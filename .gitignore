@@ -1,0 +1,6 @@
+# build output
+/dist/
+/native/build/
+/installer/build/
+# downloaded build tools
+/.tools/

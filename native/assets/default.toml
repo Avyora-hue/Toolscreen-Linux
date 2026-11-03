@@ -1,0 +1,648 @@
+lang='en'
+disableHookChaining = false
+allowCursorEscape = true
+basicModeEnabled = true
+configVersion = 4
+defaultMode = 'Fullscreen'
+fontPath = 'c:\Windows\Fonts\Arial.ttf'
+fpsLimit = 0
+fpsLimitSleepThreshold = 1000
+mirrorMatchColorspace = 'Auto'
+guiHotkey = [162, 73]
+borderlessHotkey = [ ]
+hideAnimationsInGame = true
+captureFakeCursor = false
+limitCaptureFramerate = false
+restoreWindowedModeOnFullscreenExit = true
+disableFullscreenPrompt = false
+startupIndicatorMode = 1
+startupIndicatorImagePath = ''
+keyRepeatDelay = -1
+keyRepeatStartDelay = -1
+mouseSensitivity = 1.0
+windowOverlay = []
+windowsMouseSpeed = 0
+
+[cursors]
+enabled = false
+
+    [cursors.ingame]
+    cursorName = 'Cross (Inverted, medium)'
+    cursorSize = 32
+
+    [cursors.title]
+    cursorName = 'Arrow'
+    cursorSize = 32
+
+    [cursors.wall]
+    cursorName = 'Arrow'
+    cursorSize = 32
+
+[cursorTrail]
+enabled = false
+onlyOnMyScreen = false
+onlyOnObs = false
+lifetimeMs = 150
+stampSpacingPx = 1
+spriteSizePx = 11
+tailSizeScale = 0.7
+useVelocitySize = false
+velocitySizeIntensity = 0.5
+color = [ 255, 255, 255 ]
+useGradient = false
+tailColor = [ 0, 0, 0 ]
+opacity = 0.8
+blendMode = 'Alpha'
+spritePath = ''
+
+[debug]
+delayRenderingUntilFinished = false
+fakeCursor = false
+logAnimation = false
+logBrowserOverlay = false
+logFileMonitor = false
+logGui = false
+logHotkey = false
+logImageMonitor = false
+logModeSwitch = false
+logNinjabrain = false
+logObs = false
+logPerformance = false
+logTextureOps = false
+logWindowOverlay = false
+profilerScale = 1.0
+showPerformanceOverlay = false
+showProfiler = false
+showTextureGrid = false
+virtualCameraEnabled = false
+
+[eyezoom]
+centerLineColor = [ 255, 255, 255 ]
+centerLineColorOpacity = 1.0
+cloneHeight = 1300
+cloneWidth = 30
+overlayWidth = 12
+gridColor1 = [ 255, 182, 193 ]
+gridColor1Opacity = 1.0
+gridColor2 = [ 173, 216, 230 ]
+gridColor2Opacity = 1.0
+positionX = 0
+positionY = 0
+useCustomSizePosition = false
+linkRectToFont = true
+rectHeight = 50
+slideMirrorsIn = true
+slideZoomIn = true
+stretchWidth = 810
+textColor = [ 0, 0, 0 ]
+textColorOpacity = 1.0
+textFontPath = ''
+fontSizeMode = 'auto'
+textFontSize = 42
+windowHeight = 16384
+windowWidth = 384
+
+[ninjabrainOverlay]
+accentColor = [ 0, 255, 0 ]
+allowedModes = []
+alwaysShow = true
+alwaysShowBoat = false
+angleDisplay = 1
+apiBaseUrl = 'http://127.0.0.1:52533'
+bgColor = [ 55, 60, 66 ]
+bgEnabled = true
+bgOpacity = 1.0
+blindAnchor = 'topLeft'
+blindDrawOrder = 0
+blindLineGap = 0.0
+blindMarginBottom = 250.0
+blindMarginLeft = 0.0
+blindMarginRight = 300.0
+blindMarginTop = 0.0
+blindOffsetX = 0.0
+blindOffsetY = 0.0
+boatStateMarginRight = 16.0
+boatStateSize = 64.0
+borderColor = [ 71, 74, 79 ]
+borderRadius = 0.0
+borderWidth = 0
+buttonColor = [ 59, 66, 77 ]
+certaintyColor = [ 0, 206, 41 ]
+certaintyLowColor = [ 255, 0, 0 ]
+certaintyMidColor = [ 255, 255, 0 ]
+chromeColor = [ 46, 51, 61 ]
+colSpacing = 36.0
+columns = [
+    { header = 'Location', id = 'coords', show = true, staticWidth = 0 },
+    { header = '%', id = 'certainty', show = true, staticWidth = 0 },
+    { header = 'Dist.', id = 'distance', show = true, staticWidth = 0 },
+    { header = 'Nether', id = 'nether', show = true, staticWidth = 0 },
+    { header = 'Angle', id = 'angle', show = true, staticWidth = 0 }
+]
+contentPaddingBottom = 0.0
+contentPaddingTop = 0.0
+coordNegativeColor = [ 255, 255, 255 ]
+coordPositiveColor = [ 255, 255, 255 ]
+coordsDisplay = 'block'
+cornerRadius = 0.0
+customFontPath = 'fonts/OpenSans-Regular.ttf'
+dataColor = [ 255, 255, 255 ]
+dividerColor = [ 42, 46, 50 ]
+divineTextColor = [ 229, 229, 229 ]
+enabled = false
+eyeThrowRows = 3
+failureAnchor = 'topLeft'
+failureDrawOrder = 0
+failureLineGap = 64.0
+failureMarginBottom = 200.0
+failureMarginLeft = 24.0
+failureMarginRight = 250.0
+failureMarginTop = 20.0
+failureOffsetX = 0.0
+failureOffsetY = 0.0
+fontAntialiasing = false
+headerDividerColor = [ 33, 37, 41 ]
+headerFillColor = [ 45, 50, 56 ]
+hideIfStale = false
+hideIfStaleDelaySeconds = 30
+informationMessagesAnchor = 'topLeft'
+informationMessagesDrawOrder = 1
+informationMessagesFontScale = 0.75
+informationMessagesIconScale = 1.2999999523162842
+informationMessagesIconTextMargin = 24.0
+informationMessagesMarginBottom = 18.0
+informationMessagesMarginLeft = 14.0
+informationMessagesMarginRight = 0.0
+informationMessagesMarginTop = 12.0
+informationMessagesMinWidth = 285.0
+informationMessagesOffsetX = 0.0
+informationMessagesOffsetY = 0.0
+informationMessagesPlacement = 'middle'
+layoutStyle = 'compact'
+onlyOnMyScreen = false
+onlyOnObs = false
+outlineColor = [ 0, 0, 0, 220 ]
+outlineWidth = 0
+overlayOpacity = 1.0
+overlayScale = 0.30000001192092896
+relativeTo = 'topLeftScreen'
+resultsAnchor = 'topLeft'
+resultsColumnGap = 0.0
+resultsDrawOrder = 0
+resultsHeaderPaddingY = 2.0
+resultsMarginBottom = 0.0
+resultsMarginLeft = 0.0
+resultsMarginRight = 0.0
+resultsMarginTop = 0.0
+resultsOffsetX = 0.0
+resultsOffsetY = 0.0
+rowSpacing = 2.0
+sectionLayoutMode = 'flow'
+showAllPreds = false
+showBoatStateInTopBar = true
+showDirectionToStronghold = true
+showEyeOverlay = true
+showRowStripes = true
+showSeparators = true
+showThrowDetails = true
+showTitleBar = false
+showWindowControls = false
+shownPredictions = 5
+sidePadding = 10.0
+staticColumnWidths = true
+subpixelNegativeColor = [ 204, 110, 114 ]
+subpixelPositiveColor = [ 117, 204, 108 ]
+textColor = [ 229, 229, 229 ]
+throwsAnchor = 'topLeft'
+throwsBackgroundColor = [ 51, 56, 61 ]
+throwsDrawOrder = 2
+throwsHeaderPaddingY = 3.0
+throwsMarginBottom = 0.0
+throwsMarginLeft = 0.0
+throwsMarginRight = 0.0
+throwsMarginTop = 0.0
+throwsOffsetX = 0.0
+throwsOffsetY = 0.0
+throwsRowPaddingY = 0.0
+throwsTextColor = [ 192, 192, 192 ]
+titleText = 'Ninjabrain Bot'
+titleTextColor = [ 255, 255, 255 ]
+versionTextColor = [ 194, 194, 194 ]
+x = 0
+y = 0
+
+[keyRebinds]
+enabled = false
+resolveRebindTargetsForHotkeys = false
+allowSystemAltTab = false
+allowSystemAltF4 = false
+suppressCapsLockToggle = false
+indicatorMode = 0
+toggleHotkey = [ ]
+layoutExtraKeys = [ ]
+rebinds = []
+
+[[hotkey]]
+altSecondaryModes = []
+debounce = 100
+keys = [ 90 ]
+mainMode = 'Fullscreen'
+secondaryMode = 'Thin'
+triggerOnHold = false
+triggerOnRelease = false
+
+    [hotkey.conditions]
+    exclusions = [ 114 ]
+    gameState = []
+
+[[hotkey]]
+altSecondaryModes = []
+debounce = 100
+keys = [ 74 ]
+mainMode = 'Fullscreen'
+secondaryMode = 'EyeZoom'
+triggerOnHold = false
+triggerOnRelease = false
+
+    [hotkey.conditions]
+    exclusions = [ 114 ]
+    gameState = []
+
+[[hotkey]]
+altSecondaryModes = []
+debounce = 100
+keys = [ 164 ]
+mainMode = 'Fullscreen'
+secondaryMode = 'Wide'
+triggerOnHold = false
+triggerOnRelease = false
+
+    [hotkey.conditions]
+    exclusions = [ 114 ]
+    gameState = []
+
+[[image]]
+background = { color = [ 0, 0, 0 ], enabled = true, opacity = 0.5 }
+border = { color = [ 255, 255, 255 ], enabled = false, radius = 0, width = 4 }
+colorKeys = []
+crop_bottom = 0
+crop_left = 0
+crop_right = 0
+crop_top = 0
+enableColorKey = true
+name = 'Ninjabrain Bot'
+onlyOnMyScreen = false
+opacity = 0.75
+path = ''
+pixelatedScaling = false
+relativeTo = 'topLeftScreen'
+relativeSizing = true
+scale = 1.2
+x = 0
+y = 0
+
+[[mirror]]
+captureHeight = 7
+captureWidth = 23
+colorPassthrough = false
+colorSensitivity = 0.001
+colors = { border = [ 0, 0, 0 ], output = [ 255, 255, 255 ], targetColors = [ [ 221, 221, 221 ] ] }
+fps = 30
+input = [ { relativeTo = 'topLeftViewport', x = 14, y = 38 } ]
+name = 'E Counter'
+onlyOnMyScreen = false
+opacity = 1.0
+output = { relativeTo = 'centerViewport', relativeX = 0.5, relativeY = 0.5, scale = 8.0, scaleX = 1.0, scaleY = 1.0, separateScale = false, useRelativePosition = false, x = 362, y = 169 }
+rawOutput = false
+
+    [mirror.border]
+    dynamicThickness = 2
+    staticColor = [ 255, 255, 255 ]
+    staticHeight = 0
+    staticOffsetX = 0
+    staticOffsetY = 0
+    staticRadius = 0
+    staticShape = 'Rectangle'
+    staticThickness = 2
+    staticWidth = 0
+    type = 'Dynamic'
+
+[[mirror]]
+captureHeight = 7
+captureWidth = 19
+colorPassthrough = false
+colorSensitivity = 0.001
+colors = { border = [ 0, 0, 0 ], output = [ 255, 255, 255 ], targetColors = [ [ 233, 109, 77 ] ] }
+fps = 30
+input = [
+    { relativeTo = 'pieRight', x = 0, y = 0 },
+    { relativeTo = 'pieRight', x = 0, y = 8 },
+    { relativeTo = 'pieRight', x = 0, y = 16 },
+    { relativeTo = 'pieRight', x = 0, y = 24 }
+]
+name = 'Mapless'
+onlyOnMyScreen = false
+opacity = 1.0
+output = { relativeTo = 'bottomRightViewport', relativeX = 0.5, relativeY = 0.5, scale = 8.0, scaleX = 8.0, scaleY = 8.0, separateScale = false, useRelativePosition = false, x = 71, y = 242 }
+rawOutput = false
+
+    [mirror.border]
+    dynamicThickness = 2
+    staticColor = [ 255, 255, 255 ]
+    staticHeight = 0
+    staticOffsetX = 0
+    staticOffsetY = 0
+    staticRadius = 0
+    staticShape = 'Rectangle'
+    staticThickness = 2
+    staticWidth = 0
+    type = 'Dynamic'
+
+[[mirror]]
+captureHeight = 7
+captureWidth = 11
+colorPassthrough = false
+colorSensitivity = 0.001
+colors = { border = [ 90, 54, 14 ], output = [ 243, 169, 78 ], targetColors = [ [ 233, 109, 77 ] ] }
+fps = 30
+input = [
+    { relativeTo = 'pieLeft', x = 0, y = 0 },
+    { relativeTo = 'pieLeft', x = 0, y = 8 },
+    { relativeTo = 'pieLeft', x = 0, y = 16 },
+    { relativeTo = 'pieLeft', x = 0, y = 24 }
+]
+name = 'blockentities left'
+onlyOnMyScreen = false
+opacity = 1.0
+output = { relativeTo = 'centerScreen', relativeX = 0.5, relativeY = 0.5, scale = 8.0, scaleX = 1.0, scaleY = 1.0, separateScale = false, useRelativePosition = false, x = 0, y = 0 }
+rawOutput = false
+
+    [mirror.border]
+    dynamicThickness = 2
+    staticColor = [ 255, 255, 255 ]
+    staticHeight = 0
+    staticOffsetX = 0
+    staticOffsetY = 0
+    staticRadius = 0
+    staticShape = 'Rectangle'
+    staticThickness = 2
+    staticWidth = 0
+    type = 'Dynamic'
+
+[[mirror]]
+captureHeight = 7
+captureWidth = 11
+colorPassthrough = true
+colorSensitivity = 0.001
+colors = { border = [ 51, 88, 48 ], output = [ 0, 0, 0 ], targetColors = [ [ 69, 204, 101 ], [ 69, 203, 101 ] ] }
+fps = 30
+input = [
+    { relativeTo = 'pieLeft', x = 0, y = 0 },
+    { relativeTo = 'pieLeft', x = 0, y = 8 },
+    { relativeTo = 'pieLeft', x = 0, y = 16 },
+    { relativeTo = 'pieLeft', x = 0, y = 24 }
+]
+name = 'unspecified left'
+onlyOnMyScreen = false
+opacity = 1.0
+output = { relativeTo = 'centerViewport', relativeX = 0.5, relativeY = 0.5, scale = 8.0, scaleX = 1.0, scaleY = 1.0, separateScale = false, useRelativePosition = false, x = 0, y = 0 }
+rawOutput = false
+
+    [mirror.border]
+    dynamicThickness = 2
+    staticColor = [ 255, 255, 255 ]
+    staticHeight = 0
+    staticOffsetX = 0
+    staticOffsetY = 0
+    staticRadius = 0
+    staticShape = 'Rectangle'
+    staticThickness = 2
+    staticWidth = 0
+    type = 'Dynamic'
+
+[[mirror]]
+captureHeight = 169
+captureWidth = 319
+colorPassthrough = true
+colorSensitivity = 0.001
+colors = { border = [ 186, 64, 64 ], output = [ 239, 187, 187 ], targetColors = [ [ 70, 206, 102 ], [ 236, 110, 78 ], [ 228, 70, 196 ], [ 204, 108, 70 ], [ 70, 76, 70 ] ] }
+fps = 30
+input = [ { relativeTo = 'pieLeft', x = -238, y = -180 } ]
+name = 'Pie'
+onlyOnMyScreen = false
+opacity = 1.0
+output = { relativeTo = 'centerViewport', relativeX = 0.135, relativeY = 0.0215, scale = 1.14, scaleX = 0.76, scaleY = 1.5, separateScale = true, useRelativePosition = false, x = 410, y = 31 }
+rawOutput = false
+
+    [mirror.border]
+    dynamicThickness = 4
+    staticColor = [ 98, 5, 113 ]
+    staticHeight = 235
+    staticOffsetX = 1
+    staticOffsetY = -7
+    staticRadius = 171
+    staticShape = 'Circle'
+    staticThickness = 3
+    staticWidth = 238
+    type = 'Static'
+
+[[mirrorGroup]]
+mirrors = [
+    { enabled = true, heightPercent = 1.0, mirrorId = 'Pie', offsetX = 360, offsetY = 0, widthPercent = 1.0 },
+    { enabled = true, heightPercent = 1.0, mirrorId = 'blockentities left', offsetX = 416, offsetY = -38, widthPercent = 1.0 },
+    { enabled = true, heightPercent = 1.0, mirrorId = 'unspecified left', offsetX = 416, offsetY = 23, widthPercent = 1.0 }
+]
+name = 'Preemptive Pie'
+output = { relativeTo = 'centerViewport', relativeX = 0.0, relativeY = 0.0, scale = 1.0, scaleX = 1.0, scaleY = 1.0, separateScale = false, useRelativePosition = false, x = 0, y = 0 }
+
+[[mode]]
+border = { color = [ 255, 255, 255 ], enabled = false, radius = 0, width = 4 }
+height = 'screenHeight'
+id = 'Fullscreen'
+sources = [ { type = 'Mirror', id = 'Mapless' }, { type = 'Image', id = 'Ninjabrain Bot' } ]
+modeSensitivity = 1.0
+modeSensitivityX = 1.0
+modeSensitivityY = 1.0
+sensitivityOverrideEnabled = false
+separateXYSensitivity = false
+stretch = { enabled = true, height = 1440, width = 2560, x = 0, y = 0 }
+width = 'screenWidth'
+browserOverlayIds = []
+windowOverlayIds = []
+
+    [mode.transition]
+    gameTransition = 'Cut'
+    overlayTransition = 'Cut'
+    backgroundTransition = 'Cut'
+    transitionDurationMs = 150
+    easeInPower = 1.0
+    easeOutPower = 3.0
+    bounceCount = 0
+    bounceIntensity = 0.15
+    bounceDurationMs = 100
+    relativeStretching = false
+    skipAnimateX = false
+    skipAnimateY = false
+    slideMirrorsIn = true
+
+    [mode.background]
+    color = [ 0, 0, 0 ]
+    gradientAngle = 0.0
+    gradientAnimation = 'None'
+    gradientAnimationSpeed = 1.0
+    gradientColorFade = false
+    gradientStops = [ { color = [ 0, 0, 0 ], position = 0.0 }, { color = [ 255, 255, 255 ], position = 1.0 } ]
+    image = ''
+    selectedMode = 'color'
+
+[[mode]]
+border = { color = [ 255, 255, 255 ], enabled = false, radius = 0, width = 4 }
+height = 16384
+id = 'EyeZoom'
+sources = [ { type = 'Mirror', id = 'E Counter' }, { type = 'MirrorGroup', id = 'Preemptive Pie' }, { type = 'Image', id = 'Ninjabrain Bot' } ]
+modeSensitivity = 1.0
+modeSensitivityX = 1.0
+modeSensitivityY = 1.0
+sensitivityOverrideEnabled = false
+separateXYSensitivity = false
+stretch = { enabled = false, height = 0, width = 0, x = 0, y = 0 }
+width = 384
+
+    [mode.transition]
+    gameTransition = 'Cut'
+    overlayTransition = 'Cut'
+    backgroundTransition = 'Cut'
+    transitionDurationMs = 150
+    easeInPower = 1.0
+    easeOutPower = 3.0
+    bounceCount = 0
+    bounceIntensity = 0.15
+    bounceDurationMs = 100
+    relativeStretching = false
+    skipAnimateX = false
+    skipAnimateY = true
+    slideMirrorsIn = true
+
+    [mode.background]
+    color = [ 24, 21, 37 ]
+    gradientAngle = 45.0
+    gradientAnimation = 'Wave'
+    gradientAnimationSpeed = 0.5
+    gradientColorFade = false
+    gradientStops = [ { color = [ 84, 11, 128 ], position = 0.0 }, { color = [ 21, 0, 72 ], position = 1.0 } ]
+    image = ''
+    selectedMode = 'gradient'
+
+[[mode]]
+border = { color = [ 255, 255, 255 ], enabled = false, radius = 0, width = 4 }
+height = 16384
+id = 'Preemptive'
+sources = [ { type = 'Mirror', id = 'E Counter' }, { type = 'MirrorGroup', id = 'Preemptive Pie' } ]
+modeSensitivity = 1.0
+modeSensitivityX = 1.0
+modeSensitivityY = 1.0
+sensitivityOverrideEnabled = false
+separateXYSensitivity = false
+stretch = { enabled = false, height = 0, width = 0, x = 0, y = 0 }
+width = 384
+
+    [mode.transition]
+    gameTransition = 'Cut'
+    overlayTransition = 'Cut'
+    backgroundTransition = 'Cut'
+    transitionDurationMs = 150
+    easeInPower = 1.0
+    easeOutPower = 3.0
+    bounceCount = 0
+    bounceIntensity = 0.15
+    bounceDurationMs = 100
+    relativeStretching = false
+    skipAnimateX = false
+    skipAnimateY = true
+    slideMirrorsIn = true
+
+    [mode.background]
+    color = [ 24, 21, 37 ]
+    gradientAngle = 45.0
+    gradientAnimation = 'Wave'
+    gradientAnimationSpeed = 0.5
+    gradientColorFade = false
+    gradientStops = [ { color = [ 84, 11, 128 ], position = 0.0 }, { color = [ 21, 0, 72 ], position = 1.0 } ]
+    image = ''
+    selectedMode = 'gradient'
+
+[[mode]]
+border = { color = [ 122, 21, 162 ], enabled = true, radius = 0, width = 1 }
+height = 'roundEven(screenHeight * 0.95)'
+id = 'Thin'
+sources = [ { type = 'Mirror', id = 'Mapless' }, { type = 'Mirror', id = 'E Counter' }, { type = 'MirrorGroup', id = 'Preemptive Pie' } ]
+modeSensitivity = 1.0
+modeSensitivityX = 1.0
+modeSensitivityY = 1.0
+sensitivityOverrideEnabled = false
+separateXYSensitivity = false
+stretch = { enabled = false, height = 0, width = 0, x = 0, y = 0 }
+width = 'max(330, roundEven(screenWidth / 8))'
+
+    [mode.transition]
+    gameTransition = 'Cut'
+    overlayTransition = 'Cut'
+    backgroundTransition = 'Cut'
+    transitionDurationMs = 150
+    easeInPower = 1.0
+    easeOutPower = 3.0
+    bounceCount = 0
+    bounceIntensity = 0.02
+    bounceDurationMs = 100
+    relativeStretching = false
+    skipAnimateX = false
+    skipAnimateY = false
+    slideMirrorsIn = true
+
+    [mode.background]
+    color = [ 24, 21, 37 ]
+    gradientAngle = 45.0
+    gradientAnimation = 'Wave'
+    gradientAnimationSpeed = 0.5
+    gradientColorFade = false
+    gradientStops = [ { color = [ 84, 11, 128 ], position = 0.0 }, { color = [ 21, 0, 72 ], position = 1.0 } ]
+    image = ''
+    selectedMode = 'gradient'
+
+[[mode]]
+border = { color = [ 122, 21, 162 ], enabled = true, radius = 0, width = 1 }
+height = 0.25
+id = 'Wide'
+sources = []
+modeSensitivity = 1.0
+modeSensitivityX = 1.0
+modeSensitivityY = 1.0
+sensitivityOverrideEnabled = false
+separateXYSensitivity = false
+stretch = { enabled = false, height = 0, width = 0, x = 0, y = 0 }
+width = "roundEven(screenWidth * 0.98)"
+
+    [mode.transition]
+    gameTransition = 'Cut'
+    overlayTransition = 'Cut'
+    backgroundTransition = 'Cut'
+    transitionDurationMs = 150
+    easeInPower = 1.0
+    easeOutPower = 3.0
+    bounceCount = 0
+    bounceIntensity = 0.15
+    bounceDurationMs = 100
+    relativeStretching = false
+    skipAnimateX = false
+    skipAnimateY = false
+    slideMirrorsIn = true
+
+    [mode.background]
+    color = [ 24, 21, 37 ]
+    gradientAngle = 45.0
+    gradientAnimation = 'Wave'
+    gradientAnimationSpeed = 0.5
+    gradientColorFade = false
+    gradientStops = [ { color = [ 84, 11, 128 ], position = 0.0 }, { color = [ 21, 0, 72 ], position = 1.0 } ]
+    image = ''
+    selectedMode = 'gradient'
