@@ -1,10 +1,8 @@
 // Config loading: the same TOML schema as Windows Toolscreen, so a config.toml copied from Windows works unchanged.
 #include "ts.h"
 
+#include "config_toml.h"
 #include "expression_parser.h"
-
-#define TOML_EXCEPTIONS 1
-#include "../third_party/toml.hpp"
 
 #include <sys/stat.h>
 #include <unistd.h>
@@ -543,6 +541,52 @@ std::string BuildDefaultConfigText(int screenW, int screenH) {
 }
 
 }  // namespace
+
+void ConfigFromToml(const toml::table& root, Config& out) {
+    Config c;
+    ParseConfig(root, c);
+    out = std::move(c);
+}
+
+std::string DefaultConfigText(int screenW, int screenH) { return BuildDefaultConfigText(screenW, screenH); }
+
+bool ReadConfigToml(toml::table& out, std::string& err) {
+    try {
+        out = toml::parse_file(ConfigPath());
+        return true;
+    } catch (const toml::parse_error& e) {
+        std::ostringstream ss;
+        ss << "config.toml line " << e.source().begin.line << ": " << e.description();
+        err = ss.str();
+    } catch (const std::exception& e) {
+        err = e.what();
+    }
+    return false;
+}
+
+bool WriteConfigToml(const toml::table& doc, std::string& err) {
+    std::string path = ConfigPath();
+    MakeDirs(ConfigDir());
+    std::ifstream old(path, std::ios::binary);
+    if (old) {
+        std::ofstream bak(path + ".bak", std::ios::binary);
+        bak << old.rdbuf();
+    }
+    std::string tmp = path + ".tmp";
+    {
+        std::ofstream f(tmp, std::ios::binary);
+        f << "# Toolscreen config (saved by the in-game settings editor)\n\n" << doc << "\n";
+        if (!f) {
+            err = "cannot write " + tmp;
+            return false;
+        }
+    }
+    if (rename(tmp.c_str(), path.c_str()) != 0) {
+        err = "cannot replace " + path;
+        return false;
+    }
+    return true;
+}
 
 std::string ConfigDir() {
     char cwd[4096];

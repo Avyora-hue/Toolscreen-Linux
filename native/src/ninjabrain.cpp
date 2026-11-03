@@ -287,3 +287,13 @@ NinjabrainData NinjabrainSnapshot() {
     std::lock_guard<std::mutex> lock(g_mutex);
     return g_data;
 }
+
+NinjabrainFlags NinjabrainFlagsNow() {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    NinjabrainFlags f;
+    f.connected = g_data.connected;
+    f.hasData = (g_data.resultType != "NONE" && !g_data.resultType.empty()) || g_data.hasBlindResult || !g_data.messages.empty();
+    f.lastUpdate = g_data.lastUpdate;
+    f.lastMeasurement = g_data.lastMeasurement;
+    return f;
+}

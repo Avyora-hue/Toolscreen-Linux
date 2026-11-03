@@ -6,6 +6,7 @@
 | [toml++](https://github.com/marzer/tomlplusplus) by Mark Gillard | `native/third_party/toml.hpp` | MIT |
 | [stb_image / stb_truetype](https://github.com/nothings/stb) by Sean Barrett | `native/third_party/stb_*.h` | MIT or public domain |
 | [JSON for Modern C++](https://github.com/nlohmann/json) by Niels Lohmann | `native/third_party/json.hpp` | MIT |
+| [Dear ImGui](https://github.com/ocornut/imgui) by Omar Cornut | `native/third_party/imgui/` | MIT |
 | [Open Sans](https://fonts.google.com/specimen/Open+Sans) | `native/assets/OpenSans-Regular.ttf` | SIL Open Font License 1.1 |
 
 The full license texts are in the headers of each third-party file.

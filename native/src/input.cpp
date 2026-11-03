@@ -1,10 +1,12 @@
 // Input: hotkeys, sensitivity overrides, key rebinding and the Ctrl+I panel.
 // Config files store Windows virtual-key codes (VK_*), so GLFW key codes are translated to VK codes here.
 #include "ts.h"
+#include "gui.h"
 
 #include <unistd.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <map>
 
@@ -168,38 +170,11 @@ void FireToggle(size_t i) {
     RequestModeSwitch(target);
 }
 
-void OpenWithDesktop(const std::string& path) {
-    pid_t pid = fork();
-    if (pid == 0) {
-        setsid();
-        if (fork() == 0) {
-            execlp("xdg-open", "xdg-open", path.c_str(), static_cast<char*>(nullptr));
-        }
-        _exit(0);
-    }
-}
-
-// Ctrl+I panel keys. While the panel is open it takes all key presses; key releases still reach the game.
-bool HandlePanelKey(int vk) {
-    if (vk == 0x1B) {  // Escape closes
-        g_rt.guiOpen = false;
-        return true;
-    }
-    if (vk == 'R') {
-        // Touching the mtime makes the next poll reload.
-        std::string p = ConfigPath();
-        if (FILE* f = fopen(p.c_str(), "a")) fclose(f);
-        RenderShowToast("Toolscreen: reloading config", 1.5);
-        return true;
-    }
-    if (vk == 'E') {
-        OpenWithDesktop(ConfigPath());
-        return true;
-    }
-    if (vk == 'O') {
-        OpenWithDesktop(ConfigDir());
-        return true;
-    }
+// While the editor is open it takes all key presses (releases still reach the game). Escape or the editor
+// hotkey closes it, except while typing in a text field.
+bool HandleEditorKey(int vk) {
+    if (GuiWantsTextInput()) return true;
+    if (vk == 0x1B) g_rt.guiOpen = false;
     return true;
 }
 
@@ -214,11 +189,22 @@ bool ProcessPress(int vk) {
         if (g_hotkeyRt[i].releaseArmed && !ComboUsesKey(cfg.hotkeys[i].keys, vk)) g_hotkeyRt[i].releaseArmed = false;
     }
 
-    if (ComboTriggered(cfg.guiHotkey, vk)) {
+    if (g_rt.guiOpen && GuiCapturingKeys()) {
+        GuiCaptureKey(vk, true);
+        return true;
+    }
+    if (!cfg.guiHotkey.empty() && VkMatches(cfg.guiHotkey.back(), vk)) {
+        // Diagnostics for the editor shortcut: which keys counted as held when its last key was pressed.
+        std::string held;
+        for (size_t i = 0; i + 1 < cfg.guiHotkey.size(); i++) held += VkComboName({cfg.guiHotkey[i]}) + (IsVkHeld(cfg.guiHotkey[i]) ? " held " : " NOT held ");
+        TsLog("editor shortcut %s: %s-> %s", VkComboName(cfg.guiHotkey).c_str(), held.c_str(),
+              ComboTriggered(cfg.guiHotkey, vk) ? (g_rt.guiOpen ? "closing editor" : "opening editor") : "not triggered");
+    }
+    if (ComboTriggered(cfg.guiHotkey, vk) && !GuiWantsTextInput()) {
         g_rt.guiOpen = !g_rt.guiOpen;
         return true;
     }
-    if (g_rt.guiOpen) return HandlePanelKey(vk);
+    if (g_rt.guiOpen) return HandleEditorKey(vk);
 
     if (ComboTriggered(cfg.imageOverlaysHotkey, vk)) {
         g_rt.imagesVisible = !g_rt.imagesVisible;
@@ -283,6 +269,11 @@ bool ProcessPress(int vk) {
         g_rt.sensOverrideActive = on;
         g_rt.sensOverrideX = s.separateXY ? s.sensitivityX : s.sensitivity;
         g_rt.sensOverrideY = s.separateXY ? s.sensitivityY : s.sensitivity;
+        if (s.toggle) {
+            char msg[96];
+            snprintf(msg, sizeof(msg), on ? "Low sensitivity ON (x%.4g)" : "Sensitivity back to normal", g_rt.sensOverrideX);
+            RenderShowToast(msg, 1.5);
+        }
     }
     return swallow;
 }
@@ -290,6 +281,7 @@ bool ProcessPress(int vk) {
 bool ProcessRelease(int vk) {
     const Config& cfg = g_rt.cfg;
     EnsureRuntimeSized();
+    if (g_rt.guiOpen && GuiCapturingKeys()) GuiCaptureKey(vk, false);
     if (g_rt.guiOpen) return false;  // releases always reach the game so no key stays stuck down
     bool swallow = false;
     double now = NowSeconds();
@@ -322,6 +314,17 @@ bool ProcessRelease(int vk) {
 }
 
 }  // namespace
+
+void TsOpenPath(const std::string& path) {
+    pid_t pid = fork();
+    if (pid == 0) {
+        setsid();
+        if (fork() == 0) {
+            execlp("xdg-open", "xdg-open", path.c_str(), static_cast<char*>(nullptr));
+        }
+        _exit(0);
+    }
+}
 
 int GlfwKeyToVk(int glfwKey) {
     auto& m = GlfwToVkMap();
@@ -411,7 +414,7 @@ void InputGetSensitivity(float& sx, float& sy) {
 
 // Leaving the world (wall, title, waiting) drops back to the default mode and clears alternate modes.
 void InputPerFrame() {
-    std::string state = GetGameState();
+    const std::string& state = GetGameStateRef();
     if (state == g_lastGameState) return;
     std::string prev = g_lastGameState;
     g_lastGameState = state;
@@ -421,6 +424,11 @@ void InputPerFrame() {
             h.altIndex = -1;
             h.holdActive = false;
             h.releaseArmed = false;
+        }
+        // A sensitivity toggle left on does not carry into the next world.
+        if (g_rt.sensOverrideActive) {
+            g_rt.sensOverrideActive = false;
+            for (size_t j = 0; j < g_sensToggled.size(); j++) g_sensToggled[j] = false;
         }
         if (g_rt.currentMode != g_rt.cfg.defaultMode) RequestModeSwitch(g_rt.cfg.defaultMode);
     }

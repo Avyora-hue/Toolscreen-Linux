@@ -14,7 +14,9 @@ import java.io.OutputStream;
 import java.net.URLDecoder;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 
 import javax.swing.BorderFactory;
@@ -33,12 +35,13 @@ import javax.swing.UIManager;
  * &lt;instance&gt;/toolscreen-linux/ and sets the instance's Wrapper command so the game starts with the library
  * preloaded.
  *
- * Command line: java -jar Toolscreen-linux.jar [--install DIR | --uninstall DIR | --status DIR | --list] [--force]
+ * Command line: java -jar Toolscreen-linux.jar [--install DIR | --uninstall DIR | --status DIR | --build-recommended DIR | --list]
+ * [--force]
  * (--force skips the check that the launcher is closed)
  */
 public final class Installer {
 
-    static final String VERSION = "1.3.6-linux.1";
+    static final String VERSION = "1.3.6-linux.2";
     static final String TITLE = "Toolscreen " + VERSION;
     static final String FOLDER = "toolscreen-linux";
     static final String WRAPPER = "toolscreen-wrapper.sh";
@@ -90,6 +93,11 @@ public final class Installer {
         if (inst == null) {
             System.err.println("Not an instance folder (no instance.cfg): " + dir);
             return 2;
+        }
+        if (cmd.equals("--build-recommended")) {
+            // Only (re)builds ~/.config/toolscreen/recommended.toml; the instance settings are not touched.
+            System.out.println(buildRecommended(inst));
+            return 0;
         }
         if (cmd.equals("--status")) {
             System.out.println(isInstalled(inst.dir) ? "installed" : "not installed");
@@ -146,7 +154,7 @@ public final class Installer {
 
         final JLabel info = new JLabel();
         info.setVerticalAlignment(JLabel.TOP);
-        info.setPreferredSize(new Dimension(560, 170));
+        info.setPreferredSize(new Dimension(700, 230));
 
         JPanel center = new JPanel(new BorderLayout(6, 8));
         final JComboBox<Instance> combo = new JComboBox<Instance>(instances.toArray(new Instance[0]));
@@ -190,12 +198,14 @@ public final class Installer {
                 info.setText("<html><table cellpadding=2>"
                         + "<tr><td style='color:#888'>Instance</td><td><b>" + esc(inst.name) + "</b></td></tr>"
                         + "<tr><td style='color:#888'>Launcher</td><td>" + inst.launcher.displayName + "</td></tr>"
-                        + "<tr><td style='color:#888'>Folder</td><td>" + esc(inst.dir.getPath()) + "</td></tr>"
+                        + "<tr><td style='color:#888'>Folder</td><td>" + esc(shortPath(inst.dir.getPath())) + "</td></tr>"
                         + "<tr><td style='color:#888'>Status</td><td>" + (installed ? "<span style='color:#3a3'>Installed</span>"
                         : "Not installed") + "</td></tr>"
-                        + "<tr><td style='color:#888'>Config</td><td>" + esc(configFile().getPath()) + "</td></tr>"
-                        + "</table><br>In game: <b>Ctrl+I</b> shows Toolscreen's status and hotkeys. Default hotkeys: "
-                        + "<b>Z</b> Thin, <b>J</b> EyeZoom, <b>Left Alt</b> Wide.</html>");
+                        + "<tr><td style='color:#888'>Config</td><td>" + esc(shortPath(configFile().getPath())) + "</td></tr>"
+                        + "</table><p style='width:540px; margin-top:8px'>In game, <b>Ctrl+I</b> opens the settings editor; its "
+                        + "<b>Defaults</b> tab loads the recommended settings that Install builds for this computer. Hotkeys: "
+                        + "<b>Z</b> Thin, <b>J</b> EyeZoom, <b>Left Alt</b> Wide, <b>O</b> OneShot, <b>B</b> low sensitivity, "
+                        + "<b>P</b> Ninjabrain Bot panel.</p></html>");
             }
         };
         combo.addActionListener(new java.awt.event.ActionListener() {
@@ -211,8 +221,8 @@ public final class Installer {
                 }
                 try {
                     String msg = install(inst);
-                    JOptionPane.showMessageDialog(frame, "<html><b>Installed!</b><br><br>" + msg.replace("\n", "<br>")
-                            + "<br><br>Launch the instance from " + inst.launcher.displayName + " as usual.</html>", TITLE,
+                    JOptionPane.showMessageDialog(frame, "<html><div style='width:560px'><b>Installed!</b><br><br>" + esc(msg).replace("\n", "<br>")
+                            + "<br><br>Launch the instance from " + inst.launcher.displayName + " as usual.</div></html>", TITLE,
                             JOptionPane.INFORMATION_MESSAGE);
                 } catch (Exception ex) {
                     JOptionPane.showMessageDialog(frame, "Installation failed:\n" + ex.getMessage(), TITLE, JOptionPane.ERROR_MESSAGE);
@@ -358,13 +368,18 @@ public final class Installer {
         ini.save(cfgFile);
         saveState(folder, state);
         importWindowsConfigIfPresent(notes);
+        try {
+            notes.add(buildRecommended(inst));
+        } catch (IOException e) {
+            notes.add("Could not build the recommended settings: " + e.getMessage());
+        }
 
         StringBuilder sb = new StringBuilder();
         sb.append("Toolscreen is set up for ").append(inst.name).append(" (").append(inst.launcher.displayName).append(").");
         for (String n : notes) {
             sb.append("\n").append(n);
         }
-        sb.append("\nConfig file: ").append(configFile().getPath()).append(" (created on first launch).");
+        sb.append("\nConfig file: ").append(shortPath(configFile().getPath()));
         return sb.toString();
     }
 
@@ -400,7 +415,7 @@ public final class Installer {
         }
         ini.save(cfgFile);
         deleteRecursive(folder);
-        return "Toolscreen was removed from " + inst.name + ".\nYour config in " + configFile().getParent() + " was kept.";
+        return "Toolscreen was removed from " + inst.name + ".\nYour config in " + shortPath(configFile().getParent()) + " was kept.";
     }
 
     /** Removes our wrapper (first argument) from a wrapper command line, leaving any chained wrapper. */
@@ -493,6 +508,192 @@ public final class Installer {
                 }
             }
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Recommended settings, built once per computer at install time and loaded from the in-game Defaults tab.
+    // ------------------------------------------------------------------
+    static File recommendedFile() {
+        return new File(configFile().getParentFile(), "recommended.toml");
+    }
+
+    /** Minecraft's options.txt from the instance's game folder (minecraft/ or .minecraft/). */
+    static Map<String, String> readMinecraftOptions(File instDir) {
+        Map<String, String> out = new LinkedHashMap<String, String>();
+        for (String sub : new String[] {"minecraft/options.txt", ".minecraft/options.txt"}) {
+            File f = new File(instDir, sub);
+            if (!f.isFile()) {
+                continue;
+            }
+            for (String line : readSmall(f).split("\r?\n")) {
+                int c = line.indexOf(':');
+                if (c > 0) {
+                    out.put(line.substring(0, c), line.substring(c + 1));
+                }
+            }
+            break;
+        }
+        return out;
+    }
+
+    /** Minecraft's automatic GUI scale for a window size (same loop as the game). */
+    static int autoGuiScale(int w, int h) {
+        int i = 1;
+        while (i < w && i < h && w / (i + 1) >= 320 && h / (i + 1) >= 240) {
+            i++;
+        }
+        return i;
+    }
+
+    /** Perfect Travel measuring FOV for a window size (MCSR wiki table), or 0 when the size is not listed. */
+    static int perfectTravelFov(int w, int h, boolean fullscreen) {
+        if (w == 1920 && h == 1080) {
+            return fullscreen ? 31 : 30;  // windowed 1080p monitors give a 1920x1027 game window
+        }
+        if (w == 2560 && h == 1440) {
+            return fullscreen ? 31 : 30;  // windowed: 2560x1387
+        }
+        return 0;
+    }
+
+    static String tomlString(String s) {
+        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+    }
+
+    static String resourceText(String name) throws IOException {
+        InputStream in = Installer.class.getResourceAsStream(name);
+        if (in == null) {
+            throw new IOException("missing resource " + name);
+        }
+        return new String(readAll(in), UTF8);
+    }
+
+    /** Builds ~/.config/toolscreen/recommended.toml for this computer and returns a one-line summary. */
+    static String buildRecommended(Instance inst) throws IOException {
+        Map<String, String> mc = readMinecraftOptions(inst.dir);
+        int screenW = 1920;
+        int screenH = 1080;
+        String forced = System.getProperty("toolscreen.screen");  // testing: -Dtoolscreen.screen=2560x1440
+        if (forced != null && forced.matches("\\d+x\\d+")) {
+            screenW = Integer.parseInt(forced.split("x")[0]);
+            screenH = Integer.parseInt(forced.split("x")[1]);
+        } else if (!GraphicsEnvironment.isHeadless()) {
+            java.awt.DisplayMode dm = GraphicsEnvironment.getLocalGraphicsEnvironment().getDefaultScreenDevice().getDisplayMode();
+            screenW = dm.getWidth();
+            screenH = dm.getHeight();
+        }
+        String sensText = mc.containsKey("mouseSensitivity") ? mc.get("mouseSensitivity").trim() : "0.5";
+        double sens = Double.parseDouble(sensText);
+        int guiScaleSetting = mc.containsKey("guiScale") ? Integer.parseInt(mc.get("guiScale").trim()) : 0;
+        int gui = guiScaleSetting > 0 ? Math.min(guiScaleSetting, autoGuiScale(screenW, screenH)) : autoGuiScale(screenW, screenH);
+        boolean fullscreen = "true".equals(mc.containsKey("fullscreen") ? mc.get("fullscreen").trim() : "true");
+        int tallHeight = 16384;
+        // Measuring FOV (not the gameplay FOV in options.txt). With EyeZoom and Ninjabrain Bot's "Tall resolution"
+        // adjustment it must be 30: Ninjabrain Bot computes a pixel's angle with tan(15 deg), half of 30.
+        int eyezoomFov = 30;
+        // Perfect Travel (subpixel adjustment without EyeZoom) depends on the window size.
+        int ptFov = perfectTravelFov(screenW, screenH, fullscreen);
+        // Ninjabrain Bot README: crosshair correction only for 1440p fullscreen at GUI scale 3 (0.026) or 6/auto (0.104).
+        String crosshair = "0";
+        if (screenW == 2560 && screenH == 1440 && fullscreen) {
+            if (gui == 3) {
+                crosshair = "0.026";
+            } else if (gui == 6) {
+                crosshair = "0.104";
+            }
+        }
+
+        // Toolscreen: the official defaults, fitted to this screen, plus the Linux-port extras.
+        String t = resourceText("/defaults/default.toml");
+        t = t.replace("stretch = { enabled = true, height = 1440, width = 2560, x = 0, y = 0 }",
+                "stretch = { enabled = true, height = " + screenH + ", width = " + screenW + ", x = 0, y = 0 }");
+        t = t.replace("fontPath = 'c:\\Windows\\Fonts\\Arial.ttf'", "fontPath = ''");
+        t = t.replace("guiHotkey = [162, 73]", "guiHotkey = [162, 73]\nninjabrainOverlayHotkey = [ 80 ]  # P shows/hides the Ninjabrain Bot panel");
+        int nb = t.indexOf("[ninjabrainOverlay]");
+        int en = t.indexOf("enabled = false", nb);
+        if (nb >= 0 && en > nb) {
+            t = t.substring(0, en) + "enabled = true\nshowOnlyAfterMeasurement = true\nhideInMenus = true" + t.substring(en + "enabled = false".length());
+            // Top right, so the F3 coordinates in the top left stay visible.
+            int rel = t.indexOf("relativeTo = 'topLeftScreen'", nb);
+            int next = t.indexOf("\n[", nb + 1);
+            if (rel > nb && (next < 0 || rel < next)) {
+                t = t.substring(0, rel) + "relativeTo = 'topRightScreen'" + t.substring(rel + "relativeTo = 'topLeftScreen'".length());
+            }
+        }
+        t = t.replace(", { type = 'Image', id = 'Ninjabrain Bot' }", "");
+        // B toggles a low mouse sensitivity for measuring: the multiplier that matches Minecraft's slider at 0%.
+        // Minecraft's speed factor is (s*0.6+0.2)^3*8; Toolscreen scales in whole counts, so boat eye still works.
+        double cur = Math.pow(sens * 0.6 + 0.2, 3) * 8;
+        double low = Math.pow(0.2, 3) * 8;
+        String lowMult = String.format(java.util.Locale.ROOT, "%.4f", cur > 0 ? low / cur : 1.0);
+        t = t.trim() + "\n\n# B toggles a low mouse sensitivity for measuring eyes (feels like Minecraft's slider at 0%).\n"
+                + "# Minecraft's own sensitivity is not changed. Not while F3 is held, so F3+B still shows hitboxes.\n"
+                + "[[sensitivityHotkey]]\nkeys = [ 66 ]\nsensitivity = " + lowMult + "\nseparateXY = false\nsensitivityX = 1.0\n"
+                + "sensitivityY = 1.0\ntoggle = true\ndebounce = 100\n    [sensitivityHotkey.conditions]\n    exclusions = [ 114 ]\n"
+                + "    gameState = []\n";
+        // OneShot mode, with the dragon health bar mirror sized for this GUI scale (bar: 182x5 GUI pixels, 12 from the top).
+        String oneshot = resourceText("/defaults/oneshot.toml")
+                .replace("captureWidth = 364", "captureWidth = " + (182 * gui))
+                .replace("captureHeight = 10", "captureHeight = " + (5 * gui))
+                .replace("relativeTo = 'topCenterViewport', x = 0, y = 24", "relativeTo = 'topCenterViewport', x = 0, y = " + (12 * gui));
+
+        // Ninjabrain Bot, as its README recommends for adjusting measured angles at a tall (EyeZoom) resolution.
+        StringBuilder nbPrefs = new StringBuilder();
+        nbPrefs.append("[recommendedNinjabrainBot]\n");
+        nbPrefs.append("# Written to ~/.java/.userPrefs/ninjabrainbot/prefs.xml by the Defaults tab (Ninjabrain Bot closed).\n");
+        nbPrefs.append("sensitivity = ").append(tomlString(String.format(java.util.Locale.ROOT, "%.10f", sens))).append("  # Minecraft's mouseSensitivity\n");
+        nbPrefs.append("angle_adjustment_type = '1'  # Tall resolution: each adjustment is one pixel\n");
+        nbPrefs.append("resolution_height = '").append(tallHeight).append("'  # EyeZoom height\n");
+        nbPrefs.append("angle_adjustment_display_type = '1'  # show the number of adjustments\n");
+        nbPrefs.append("hotkey_increment_code = '65549'  # = adds one pixel to the last angle\n");
+        nbPrefs.append("hotkey_increment_modifier = '0'\n");
+        nbPrefs.append("hotkey_decrement_code = '65548'  # - removes one pixel\n");
+        nbPrefs.append("hotkey_decrement_modifier = '0'\n");
+        nbPrefs.append("enable_http_server = 'true'  # the live panel in Toolscreen\n");
+        nbPrefs.append("show_angle_errors = 'true'\n");
+        nbPrefs.append("sigma = '0.007'  # README: 0.005-0.010 for adjusted measuring; a calibrated value is kept\n");
+        nbPrefs.append("crosshair_correction = '").append(crosshair).append("'  # README: only 1440p fullscreen at GUI scale 3 or 6 needs one\n");
+        nbPrefs.append("use_precise_angle = 'true'  # boat measurements\n");
+        nbPrefs.append("default_boat_type = '1'  # Blue boat (boat-eye guides: green needs an advanced setup)\n");
+        nbPrefs.append("boat_error = '0.03'  # allowable boat angle error (boat-eye guide)\n");
+        nbPrefs.append("sigma_boat = '0.007'  # standard deviation for boat throws (boat-eye guide)\n");
+        nbPrefs.append("use_adv_statistics = 'true'  # advanced stronghold statistics\n");
+
+        StringBuilder info = new StringBuilder();
+        info.append("\n[recommendedInfo]\n");
+        info.append("generatedBy = ").append(tomlString("Toolscreen for Linux installer " + VERSION)).append("\n");
+        info.append("generatedOn = ").append(tomlString(new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm").format(new java.util.Date()))).append("\n");
+        info.append("instance = ").append(tomlString(inst.name)).append("\n");
+        info.append("screen = ").append(tomlString(screenW + "x" + screenH)).append("\n");
+        info.append("minecraftSensitivity = ").append(tomlString(sensText)).append("\n");
+        info.append("guiScale = ").append(gui).append("\n");
+        info.append("fullscreen = ").append(fullscreen).append("\n");
+        info.append("measuringFovEyeZoom = ").append(eyezoomFov).append("  # FOV to measure eyes at with EyeZoom\n");
+        info.append("measuringFovPerfectTravel = ").append(ptFov).append("  # without EyeZoom; 0 = not listed for this resolution\n\n");
+
+        String doc = "# Recommended Toolscreen settings for this computer, built by the installer on "
+                + new java.text.SimpleDateFormat("yyyy-MM-dd").format(new java.util.Date())
+                + ".\n# Load them in game: Ctrl+I > Defaults. Re-run the installer to rebuild them.\n\n"
+                + t.trim() + "\n\n" + oneshot.trim() + "\n" + info + nbPrefs;
+        File out = recommendedFile();
+        out.getParentFile().mkdirs();
+        try (OutputStream o = new FileOutputStream(out)) {
+            o.write(doc.getBytes(UTF8));
+        }
+        String summary = "Built recommended settings (" + screenW + "x" + screenH + ", GUI scale " + gui + ", sensitivity " + sensText
+                + ", measure at FOV " + eyezoomFov + ") in " + shortPath(out.getPath());
+        if (sens < 0.01) {
+            summary += ". WARNING: Minecraft's mouse sensitivity is at 0 (lowered for measuring?). Set it back to your normal "
+                    + "value and run the installer again, or the recommended sensitivity settings will be wrong";
+        }
+        File cfg = configFile();
+        if (!cfg.exists()) {
+            try (OutputStream o = new FileOutputStream(cfg)) {
+                o.write(doc.getBytes(UTF8));
+            }
+            summary += "; also used as your starting config";
+        }
+        return summary;
     }
 
     static File configFile() {
@@ -1053,6 +1254,18 @@ public final class Installer {
             Thread.sleep(ms);
         } catch (InterruptedException ignored) {
         }
+    }
+
+    /** A path for display: the home folder as ~, and very long paths shortened in the middle. */
+    static String shortPath(String p) {
+        String home = System.getProperty("user.home");
+        if (home != null && p.startsWith(home + "/")) {
+            p = "~" + p.substring(home.length());
+        }
+        if (p.length() > 80) {
+            p = p.substring(0, 36) + "…" + p.substring(p.length() - 40);
+        }
+        return p;
     }
 
     static String esc(String s) {

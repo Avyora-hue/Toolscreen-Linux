@@ -5,13 +5,17 @@ This folder was created by the Toolscreen installer. The instance's Wrapper comm
 (Edit instance -> Settings -> Custom commands) runs toolscreen-wrapper.sh, which starts
 the game with libtoolscreen.so preloaded.
 
-  Config file:   ~/.config/toolscreen/config.toml   (or <game dir>/toolscreen/config.toml if that folder exists)
-  Log file:      next to the config, toolscreen.log; messages also appear in the launcher's log as [Toolscreen]
-  In game:       Ctrl+I shows status and hotkeys; the config reloads automatically when saved
-  Defaults:      Z = Thin, J = EyeZoom, Left Alt = Wide (same as Windows Toolscreen)
+  Config file:   ~/.config/toolscreen/config.toml   (reloads automatically when saved)
+  Recommended:   ~/.config/toolscreen/recommended.toml, built by the installer for this computer;
+                 load it in game with Ctrl+I -> Defaults
+  Log file:      ~/.config/toolscreen/toolscreen.log; messages also appear in the launcher's game log as [Toolscreen]
+
+  In game:       Ctrl+I opens the settings editor (Esc or Ctrl+I closes it)
+  Hotkeys:       Z Thin, J EyeZoom, Left Alt Wide; with the recommended settings also
+                 O OneShot, B low mouse sensitivity, P Ninjabrain Bot panel
 
 The config format is the same as Windows Toolscreen, so a config.toml copied from Windows works.
-Windows paths to Ninjabrain Bot's nb-overlay.png are mapped to /tmp/nb-overlay.png.
 
 To launch once without Toolscreen, set the environment variable TOOLSCREEN_DISABLE=1.
-To remove it, run the installer jar again and choose Uninstall.
+To update or remove it, close the launcher, run the installer jar again and choose
+Reinstall / Update or Uninstall.

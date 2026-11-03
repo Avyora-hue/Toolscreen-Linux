@@ -3,10 +3,15 @@
 set -e
 cd "$(dirname "$0")"
 mkdir -p build
-rm -f build/*.o
+find build -name "*.o" ! -name "imgui*" -delete 2>/dev/null || true
 CXXFLAGS="${OPT:--O2} -std=c++17 -fPIC -fvisibility=hidden -include src/glibc_compat.h -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wno-nonnull-compare"
-for f in hooks config input render gamestate expression_parser ninjabrain; do
+for f in hooks config input render gamestate expression_parser ninjabrain gui defaults; do
     g++ $CXXFLAGS -c src/$f.cpp -o build/$f.o &
+done
+# Dear ImGui (third party): built once, warnings off.
+IMGUI_FLAGS="${OPT:--O2} -std=c++17 -fPIC -fvisibility=hidden -include src/glibc_compat.h -include src/imgui_assert.h -w"
+for f in imgui imgui_draw imgui_widgets imgui_tables imgui_impl_opengl3 imgui_stdlib; do
+    [ -f build/$f.o ] && [ build/$f.o -nt third_party/imgui/$f.cpp ] && [ build/$f.o -nt src/imgui_assert.h ] || g++ $IMGUI_FLAGS -c third_party/imgui/$f.cpp -o build/$f.o &
 done
 wait
 gcc -O2 -std=c11 -fPIC -c src/glibc_compat.c -o build/glibc_compat.o

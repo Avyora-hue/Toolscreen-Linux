@@ -5,6 +5,7 @@
 //  - glfwSwapBuffers: overlays are composited before the real swap;
 //  - key/mouse/cursor callbacks: hotkeys, key rebinds, sensitivity scaling and menu cursor mapping.
 #include "ts.h"
+#include "gui.h"
 
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -17,6 +18,8 @@
 #include <GL/gl.h>
 #include <GL/glext.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -24,6 +27,37 @@
 #include <thread>
 
 Runtime g_rt;
+PerfStats g_perf;
+
+bool PerfEnabled() {
+    static int on = -1;
+    if (on < 0) {
+        const char* e = getenv("TOOLSCREEN_PERF");
+        on = (e && *e && *e != '0') ? 1 : 0;
+    }
+    return on == 1;
+}
+
+static void PerfReport() {
+    static double last = 0;
+    double now = NowSeconds();
+    if (last == 0) last = now;
+    if (now - last < 5.0 || g_perf.frames == 0) return;
+    PerfStats& p = g_perf;
+    TsLog("perf: %d frames (%.0f fps), overlay drawn %d, screen-copy fallback %d | per frame: overlay CPU %.3f ms (max %.3f), "
+          "input/poll CPU %.3f ms, overlay GPU %.3f ms",
+          p.frames, p.frames / (now - last), p.renderedFrames, p.fallbackFrames, p.renderCpu / p.frames, p.renderCpuMax,
+          p.pollCpu / p.frames, p.gpuSamples ? p.gpuMs / p.gpuSamples : 0.0);
+    std::string stages;
+    for (int i = 0; i < 8; i++) {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "%s%s %.3f (max %.3f)", i ? ", " : "", kPerfStageNames[i], p.stage[i] / p.frames, p.stageMax[i]);
+        stages += buf;
+    }
+    TsLog("perf stages (ms): %s", stages.c_str());
+    p = PerfStats{};
+    last = now;
+}
 
 // ---------------------------------------------------------------------------
 // Logging
@@ -111,6 +145,7 @@ using GLFWcharmodsfun = void (*)(GLFWwindow*, unsigned int, int);
 using GLFWscrollfun = void (*)(GLFWwindow*, double, double);
 
 constexpr int GLFW_CURSOR = 0x00033001;
+constexpr int GLFW_CURSOR_NORMAL = 0x00034001;
 constexpr int GLFW_CURSOR_DISABLED = 0x00034003;
 constexpr int GLFW_PRESS = 1;
 constexpr int GLFW_RELEASE = 0;
@@ -319,8 +354,45 @@ static void ts_winSizeCb(GLFWwindow* w, int ww, int wh) {
     }
 }
 
+// Scales a mouse movement by the active Toolscreen sensitivity in whole counts, carrying the remainder, as
+// Windows Toolscreen does. The game then still only sees whole mouse counts, so every view angle stays on the
+// steps its own sensitivity allows; boat-eye measuring depends on that.
+void ScaleMouseDelta(double dx, double dy, float sx, float sy, double& outX, double& outY) {
+    static double accX = 0, accY = 0;
+    static float lastSx = 1, lastSy = 1;
+    static bool haveLast = false;
+    if (!haveLast || std::fabs(sx - lastSx) > 1e-6f || std::fabs(sy - lastSy) > 1e-6f) {
+        accX = accY = 0;
+        lastSx = sx;
+        lastSy = sy;
+        haveLast = true;
+    }
+    // A remainder from one direction must not delay movement the other way.
+    if (dx != 0 && accX != 0 && ((dx > 0) != (accX > 0))) accX = 0;
+    if (dy != 0 && accY != 0 && ((dy > 0) != (accY > 0))) accY = 0;
+    if (sx == 1.0f && sy == 1.0f) {
+        accX = accY = 0;
+        outX = dx;
+        outY = dy;
+        return;
+    }
+    accX += dx * sx;
+    accY += dy * sy;
+    // Truncating (not rounding) keeps the remainder's sign equal to the movement's, so the direction check above
+    // never discards it and the average output is exactly the input times the sensitivity.
+    outX = std::trunc(accX);
+    outY = std::trunc(accY);
+    accX -= outX;
+    accY -= outY;
+}
+
 static void ts_cursorPosCb(GLFWwindow* w, double x, double y) {
-    if (g_rt.guiOpen) return;
+    if (g_rt.guiOpen) {
+        double sx = g_realWinW > 0 ? static_cast<double>(g_rt.screenW) / g_realWinW : 1.0;
+        double sy = g_realWinH > 0 ? static_cast<double>(g_rt.screenH) / g_realWinH : 1.0;
+        GuiOnCursor(x * sx, y * sy);
+        return;
+    }
     if (g_rt.cursorDisabled) {
         if (!g_haveLastCursor) {
             g_lastRealX = x;
@@ -331,8 +403,10 @@ static void ts_cursorPosCb(GLFWwindow* w, double x, double y) {
         }
         float sx, sy;
         InputGetSensitivity(sx, sy);
-        g_virtX += (x - g_lastRealX) * sx;
-        g_virtY += (y - g_lastRealY) * sy;
+        double outX, outY;
+        ScaleMouseDelta(x - g_lastRealX, y - g_lastRealY, sx, sy, outX, outY);
+        g_virtX += outX;
+        g_virtY += outY;
         g_lastRealX = x;
         g_lastRealY = y;
         if (game_cursorPosCb) game_cursorPosCb(w, g_virtX, g_virtY);
@@ -344,18 +418,23 @@ static void ts_cursorPosCb(GLFWwindow* w, double x, double y) {
 }
 
 static void ts_keyCb(GLFWwindow* w, int key, int scancode, int action, int mods) {
+    if (g_rt.guiOpen && !GuiCapturingKeys()) GuiOnKey(key, action);
     int outKey = key;
     if (!InputOnKey(key, scancode, action, mods, outKey)) return;
     if (game_keyCb) game_keyCb(w, outKey, scancode, action, mods);
 }
 
 static void ts_mouseButtonCb(GLFWwindow* w, int button, int action, int mods) {
+    if (g_rt.guiOpen && !GuiCapturingKeys()) GuiOnMouseButton(button, action);
     if (!InputOnMouseButton(button, action, mods)) return;
     if (game_mouseButtonCb) game_mouseButtonCb(w, button, action, mods);
 }
 
 static void ts_charCb(GLFWwindow* w, unsigned int c) {
-    if (g_rt.guiOpen) return;
+    if (g_rt.guiOpen) {
+        GuiOnChar(c);
+        return;
+    }
     if (game_charCb) game_charCb(w, c);
 }
 
@@ -365,7 +444,10 @@ static void ts_charModsCb(GLFWwindow* w, unsigned int c, int mods) {
 }
 
 static void ts_scrollCb(GLFWwindow* w, double dx, double dy) {
-    if (g_rt.guiOpen) return;
+    if (g_rt.guiOpen) {
+        GuiOnScroll(dx, dy);
+        return;
+    }
     if (game_scrollCb) game_scrollCb(w, dx, dy);
 }
 
@@ -461,6 +543,11 @@ static void hk_glfwSetCursorPos(GLFWwindow* w, double x, double y) {
 }
 
 static void hk_glfwSetInputMode(GLFWwindow* w, int mode, int value) {
+    if (w == g_window && mode == GLFW_CURSOR && g_rt.guiOpen) {
+        // The editor keeps the cursor free; remember what the game wants for when it closes.
+        g_rt.cursorDisabled = (value == GLFW_CURSOR_DISABLED);
+        return;
+    }
     real_glfwSetInputMode(w, mode, value);
     if (w == g_window && mode == GLFW_CURSOR) {
         bool disabled = (value == GLFW_CURSOR_DISABLED);
@@ -479,19 +566,66 @@ static int hk_glfwGetMouseButton(GLFWwindow* w, int button) {
     return real_glfwGetMouseButton(w, button);
 }
 
+// Frees the cursor when the editor opens and gives it back to the game when it closes.
+static void SyncGuiCursor() {
+    static bool wasOpen = false;
+    if (g_rt.guiOpen == wasOpen) return;
+    wasOpen = g_rt.guiOpen;
+    if (g_rt.guiOpen) {
+        GuiOnOpened();
+        if (g_rt.cursorDisabled) {
+            real_glfwSetInputMode(g_window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            if (real_glfwSetCursorPos) real_glfwSetCursorPos(g_window, g_realWinW / 2.0, g_realWinH / 2.0);
+        }
+    } else if (g_rt.cursorDisabled) {
+        real_glfwSetInputMode(g_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        g_haveLastCursor = false;
+    }
+}
+
 static void hk_glfwPollEvents() {
     real_glfwPollEvents();
     if (!g_window) return;
+    double t0 = PerfEnabled() ? NowSeconds() : 0;
+    struct PollTimer {
+        double t0;
+        ~PollTimer() {
+            if (t0 > 0) g_perf.pollCpu += (NowSeconds() - t0) * 1000.0;
+        }
+    } timer{t0};
+    SyncGuiCursor();
     MaybeReloadConfig(false);
     InputPerFrame();
     ApplyPendingMode();
 }
 
+static bool CountOnly() {
+    static int on = -1;
+    if (on < 0) on = EnvFlag("TOOLSCREEN_DEBUG_COUNT_ONLY") ? 1 : 0;
+    return on == 1;
+}
+
 static void hk_glfwSwapBuffers(GLFWwindow* w) {
+    if (CountOnly()) {
+        g_perf.frames++;
+        PerfReport();
+        real_glfwSwapBuffers(w);
+        return;
+    }
     if (w == g_window) {
         static int noRender = -1;
         if (noRender < 0) noRender = EnvFlag("TOOLSCREEN_DEBUG_NO_RENDER") ? 1 : 0;
-        if (!noRender) RenderFrame();
+        if (PerfEnabled()) {
+            double t0 = NowSeconds();
+            if (!noRender) RenderFrame();
+            double dt = (NowSeconds() - t0) * 1000.0;
+            g_perf.renderCpu += dt;
+            g_perf.renderCpuMax = std::max(g_perf.renderCpuMax, dt);
+            g_perf.frames++;
+            PerfReport();
+        } else if (!noRender) {
+            RenderFrame();
+        }
         real_glfwSwapBuffers(w);
         int limit = g_rt.cfg.fpsLimit;
         if (limit > 0) {
@@ -672,6 +806,18 @@ static HookEntry g_glHooks[] = {
 };
 #undef H
 
+static const char* (*real_glfwGetClipboardString)(GLFWwindow*);
+static void (*real_glfwSetClipboardString)(GLFWwindow*, const char*);
+
+const char* TsGetClipboard() {
+    const char* s = (real_glfwGetClipboardString && g_window) ? real_glfwGetClipboardString(g_window) : nullptr;
+    return s ? s : "";
+}
+
+void TsSetClipboard(const char* text) {
+    if (real_glfwSetClipboardString && g_window) real_glfwSetClipboardString(g_window, text);
+}
+
 // Resolves any GLFW function the game has not looked up yet, from the library that provides glfwCreateWindow.
 static void EnsureGlfwReals() {
     Dl_info info;
@@ -681,6 +827,8 @@ static void EnsureGlfwReals() {
     for (auto& e : g_glfwHooks) {
         if (!*e.real) *e.real = RealDlsym()(lib, e.name);
     }
+    real_glfwGetClipboardString = reinterpret_cast<decltype(real_glfwGetClipboardString)>(RealDlsym()(lib, "glfwGetClipboardString"));
+    real_glfwSetClipboardString = reinterpret_cast<decltype(real_glfwSetClipboardString)>(RealDlsym()(lib, "glfwSetClipboardString"));
     dlclose(lib);
 }
 
@@ -741,14 +889,33 @@ static bool IsDisabled() {
     return disabled == 1;
 }
 
+static bool CallerIsSelf(void* ret) {
+    static void* selfBase = nullptr;
+    if (!selfBase) {
+        Dl_info info;
+        if (dladdr(reinterpret_cast<void*>(&CallerIsSelf), &info)) selfBase = info.dli_fbase;
+    }
+    Dl_info ci;
+    return selfBase && dladdr(ret, &ci) && ci.dli_fbase == selfBase;
+}
+
 extern "C" __attribute__((visibility("default"))) void* dlsym(void* handle, const char* name) {
     DlsymFn real = RealDlsym();
-    void* p = (handle == RTLD_NEXT) ? ResolveNext(__builtin_return_address(0), name) : real(handle, name);
+    void* ret = __builtin_return_address(0);
+    void* p = (handle == RTLD_NEXT) ? ResolveNext(ret, name) : real(handle, name);
     if (!p || !name || name[0] != 'g' || name[1] != 'l' || IsDisabled()) return p;
+    // Toolscreen's own lookups (ImGui's OpenGL loader) must get the real functions, not the game hooks.
+    if (CallerIsSelf(ret)) return p;
 
     if (name[2] == 'f' && name[3] == 'w') {
+        if (CountOnly()) {
+            if (strcmp(name, "glfwSwapBuffers") != 0) return p;
+            if (!real_glfwSwapBuffers) real_glfwSwapBuffers = reinterpret_cast<decltype(real_glfwSwapBuffers)>(p);
+            return reinterpret_cast<void*>(&hk_glfwSwapBuffers);
+        }
         return LookupHook(g_glfwHooks, sizeof(g_glfwHooks) / sizeof(g_glfwHooks[0]), name, p);
     }
+    if (CountOnly()) return p;
     if (name[2] == 'X') {
         if (strcmp(name, "glXGetProcAddressARB") == 0) {
             if (!real_glXGetProcAddressARB) real_glXGetProcAddressARB = reinterpret_cast<GetProcFn>(p);

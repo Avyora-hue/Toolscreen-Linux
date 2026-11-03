@@ -27,6 +27,7 @@ F(void*, glfwSetKeyCallback, GLFWwindow*, void (*)(GLFWwindow*, int, int, int, i
 F(void*, glfwSetCursorPosCallback, GLFWwindow*, void (*)(GLFWwindow*, double, double))
 F(void, glfwSetWindowPos, GLFWwindow*, int, int)
 F(void, glfwSwapInterval, int)
+F(void, glfwSetInputMode, GLFWwindow*, int, int)
 #undef F
 
 using GPA = void* (*)(const unsigned char*);
@@ -56,6 +57,9 @@ G(void, glLinkProgram, GLuint)
 G(void, glUseProgram, GLuint)
 G(void, glGenVertexArrays, GLsizei, GLuint*)
 G(void, glBindVertexArray, GLuint)
+G(void, glGenBuffers, GLsizei, GLuint*)
+G(void, glBindBuffer, GLenum, GLuint)
+G(void, glBufferData, GLenum, GLsizeiptr, const void*, GLenum)
 #undef G
 }  // namespace P
 
@@ -92,7 +96,7 @@ int main() {
 #define L(name) name = reinterpret_cast<decltype(name)>(dlsym(lib, #name))
     L(glfwInit); L(glfwWindowHint); L(glfwCreateWindow); L(glfwMakeContextCurrent); L(glfwSwapBuffers); L(glfwPollEvents);
     L(glfwWindowShouldClose); L(glfwGetFramebufferSize); L(glfwSetFramebufferSizeCallback); L(glfwSetKeyCallback);
-    L(glfwSetCursorPosCallback); L(glfwSetWindowPos); L(glfwSwapInterval);
+    L(glfwSetCursorPosCallback); L(glfwSetWindowPos); L(glfwSwapInterval); L(glfwSetInputMode);
 #undef L
     void* libgl = dlopen("libGL.so.1", RTLD_NOW);
     gpa = reinterpret_cast<GPA>(dlsym(libgl, "glXGetProcAddressARB"));
@@ -105,11 +109,13 @@ int main() {
     glfwSetFramebufferSizeCallback(win, OnFb);
     glfwSetKeyCallback(win, OnKey);
     glfwSetCursorPosCallback(win, OnCursor);
+    if (getenv("HARNESS_GRAB")) glfwSetInputMode(win, 0x00033001 /* GLFW_CURSOR */, 0x00034003 /* DISABLED */);
 #define L(name) P::name = reinterpret_cast<decltype(P::name)>(gpa(reinterpret_cast<const unsigned char*>(#name)))
     L(glViewport); L(glClearColor); L(glClear); L(glGenFramebuffers); L(glBindFramebuffer); L(glFramebufferTexture2D);
     L(glGenTextures); L(glBindTexture); L(glTexImage2D); L(glTexParameteri); L(glEnable); L(glDisable); L(glScissor);
     L(glDrawArrays); L(glCreateShader); L(glShaderSource); L(glCompileShader); L(glCreateProgram); L(glAttachShader);
-    L(glLinkProgram); L(glUseProgram); L(glGenVertexArrays); L(glBindVertexArray);
+    L(glLinkProgram); L(glUseProgram); L(glGenVertexArrays); L(glBindVertexArray); L(glGenBuffers); L(glBindBuffer);
+    L(glBufferData);
 #undef L
     glfwGetFramebufferSize(win, &g_w, &g_h);
     printf("harness: initial framebuffer %dx%d\n", g_w, g_h);
@@ -154,6 +160,9 @@ int main() {
         // Stripes every 10 px across the middle (visible in EyeZoom), a 1 px crosshair at the centre.
         for (int x = 0; x < g_w; x += 20) Rect(x, g_h / 2 - 400, 10, 800, 0.3f, 0.3f, 0.6f);
         Rect(g_w / 2 - 1, g_h / 2 - 1, 2, 2, 1, 1, 1);
+        // Fake dragon boss bar at GUI scale 2: 364x10 at the top centre, 24 px down (pink fill, dark rest).
+        Rect(g_w / 2 - 182, 24, 364, 10, 0.25f, 0.05f, 0.2f);
+        Rect(g_w / 2 - 182, 24, 250, 10, 0.93f, 0.0f, 0.73f);
         // Exact-centre markers: red row at y = h/2, yellow column at x = w/2.
         Rect(0, g_h / 2, g_w, 1, 1, 0, 0);
         Rect(g_w / 2, g_h / 2 - 300, 1, 600, 1, 1, 0);
@@ -169,6 +178,16 @@ int main() {
         P::glBindVertexArray(vao);
         P::glBindTexture(GL_TEXTURE_2D, g_tex);
         P::glDrawArrays(GL_TRIANGLES, 0, 3);
+        if (getenv("HARNESS_BIND_PBO")) {
+            // Like some mods: leave a pixel-unpack buffer bound at the end of the frame.
+            static GLuint pbo = 0;
+            if (!pbo) {
+                P::glGenBuffers(1, &pbo);
+                P::glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+                P::glBufferData(GL_PIXEL_UNPACK_BUFFER, 64 << 20, nullptr, GL_STREAM_DRAW);
+            }
+            P::glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+        }
         glfwSwapBuffers(win);
     }
     return 0;

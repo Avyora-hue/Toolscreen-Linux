@@ -9,3 +9,4 @@ __asm__(".symver expf,expf@GLIBC_2.2.5");
 __asm__(".symver powf,powf@GLIBC_2.2.5");
 __asm__(".symver exp2f,exp2f@GLIBC_2.2.5");
 __asm__(".symver log2f,log2f@GLIBC_2.2.5");
+__asm__(".symver atan2f,atan2f@GLIBC_2.2.5");

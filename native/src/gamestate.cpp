@@ -13,6 +13,7 @@ namespace {
 
 std::mutex g_stateMutex;
 std::string g_state;
+std::atomic<unsigned> g_stateVersion{0};
 
 std::string MapWpState(const std::string& raw) {
     if (raw.rfind("generating", 0) == 0 || raw.rfind("previewing", 0) == 0) return "generating";
@@ -39,7 +40,10 @@ void PollLoop(std::string path) {
                 if (n > 0) {
                     std::string mapped = MapWpState(buf);
                     std::lock_guard<std::mutex> lock(g_stateMutex);
-                    g_state = mapped;
+                    if (mapped != g_state) {
+                        g_state = mapped;
+                        g_stateVersion++;
+                    }
                 }
             }
         }
@@ -63,4 +67,17 @@ void StartGameStateThread() {
 std::string GetGameState() {
     std::lock_guard<std::mutex> lock(g_stateMutex);
     return g_state;
+}
+
+// Main-thread copy, refreshed only when the poller saw a change (no lock or allocation per call otherwise).
+const std::string& GetGameStateRef() {
+    static std::string cached;
+    static unsigned seen = ~0u;
+    unsigned v = g_stateVersion.load(std::memory_order_acquire);
+    if (v != seen) {
+        std::lock_guard<std::mutex> lock(g_stateMutex);
+        cached = g_state;
+        seen = v;
+    }
+    return cached;
 }

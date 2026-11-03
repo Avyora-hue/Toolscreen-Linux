@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#define TS_VERSION "1.3.6-linux.1"
+#define TS_VERSION "1.3.6-linux.2"
 
 // ---------------------------------------------------------------------------
 // Logging (stderr, which MultiMC/Prism show in the instance log, plus a file)
@@ -325,6 +325,7 @@ double NowSeconds();
 // Game state as reported by the state-output mod (wpstateout.txt) or hermes.
 void StartGameStateThread();
 std::string GetGameState();  // e.g. "title", "wall", "generating", "inworld,cursor_grabbed"
+const std::string& GetGameStateRef();  // main thread only; no lock unless the state changed
 
 // Ninjabrain Bot API client (ninjabrain.cpp)
 struct NbThrow {
@@ -357,6 +358,12 @@ struct NinjabrainData {
 };
 void NinjabrainSetUrl(const std::string& baseUrl);  // starts the client threads on first call
 NinjabrainData NinjabrainSnapshot();
+// Just the fields the panel's show/hide decision needs (no copies of the tables).
+struct NinjabrainFlags {
+    bool connected = false, hasData = false;
+    double lastUpdate = 0, lastMeasurement = 0;
+};
+NinjabrainFlags NinjabrainFlagsNow();
 
 // Input unit
 bool InputOnKey(int glfwKey, int scancode, int action, int mods, int& outKey);  // false = swallow
@@ -366,6 +373,26 @@ void InputPerFrame();
 int GlfwKeyToVk(int glfwKey);
 int VkToGlfwKey(int vk);
 bool IsVkHeld(int vk);
+
+// Display name of a key combination (e.g. "LCtrl+I").
+std::string VkComboName(const std::vector<int>& keys);
+// Opens a file or folder with the desktop's default application (xdg-open).
+void TsOpenPath(const std::string& path);
+// Clipboard through the game's GLFW.
+const char* TsGetClipboard();
+void TsSetClipboard(const char* text);
+
+// Per-frame cost measurement (TOOLSCREEN_PERF=1 logs averages every 5 seconds).
+struct PerfStats {
+    double renderCpu = 0, renderCpuMax = 0, pollCpu = 0;
+    double gpuMs = 0;
+    int gpuSamples = 0, frames = 0, renderedFrames = 0, fallbackFrames = 0;
+    // Stage timings inside the overlay pass (ms, summed) and their worst single frame.
+    double stage[8] = {0}, stageMax[8] = {0};
+};
+const char* const kPerfStageNames[8] = {"init+save", "frame source", "background", "eyezoom", "sources", "ninjabrain", "gui/toast", "restore"};
+extern PerfStats g_perf;
+bool PerfEnabled();
 
 // Render unit
 void RenderInitIfNeeded();

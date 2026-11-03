@@ -2,6 +2,7 @@
 // screen rectangle. Draws the letterbox background, mode border, EyeZoom, mirrors, images and text, then
 // restores every piece of GL state it touched.
 #include "ts.h"
+#include "gui.h"
 
 #include <GL/gl.h>
 #include <GL/glext.h>
@@ -92,7 +93,12 @@ namespace {
     X(void, VertexAttribPointer, GLuint, GLint, GLenum, GLboolean, GLsizei, const void*)                \
     X(void, EnableVertexAttribArray, GLuint)                                                            \
     X(void, DrawArrays, GLenum, GLint, GLsizei)                                                         \
-    X(const GLubyte*, GetString, GLenum)
+    X(const GLubyte*, GetString, GLenum)                                                                \
+    X(void, GenQueries, GLsizei, GLuint*)                                                               \
+    X(void, BeginQuery, GLenum, GLuint)                                                                 \
+    X(void, EndQuery, GLenum)                                                                           \
+    X(void, GetQueryObjectiv, GLuint, GLenum, GLint*)                                                   \
+    X(void, GetQueryObjectui64v, GLuint, GLenum, GLuint64*)
 
 struct Gl {
 #define X(ret, name, ...) ret(APIENTRY* name)(__VA_ARGS__) = nullptr;
@@ -260,7 +266,7 @@ void main() {
         if (dist < u_sensitivity) { matches = true; break; }
     }
     if (matches) FragColor = u_passthrough == 1 ? vec4(screenColor, 1.0) : outputColor;
-    else FragColor = vec4(0.0);
+    else discard;  // the target was cleared to transparent; discarding lets a query count the matches
 })";
 
 // Mirror output: scaled filter texture with a dynamic outline border.
@@ -374,16 +380,13 @@ bool Link(Program& p, const char* frag) {
 // Saved GL state
 // ---------------------------------------------------------------------------
 struct SavedState {
-    GLint drawFb, readFb, viewport[4], scissorBox[4], program, vao, arrayBuffer, activeTex, tex2d, sampler;
+    GLint drawFb, viewport[4], scissorBox[4], program, vao, arrayBuffer, activeTex, tex2d, sampler;
     GLint blendSrcRgb, blendDstRgb, blendSrcA, blendDstA, blendEqRgb, blendEqA;
-    GLint unpackAlign, unpackRowLength, unpackSkipRows, unpackSkipPixels, unpackBuffer, readBuffer;
     GLboolean scissor, blend, depth, stencil, cull, srgb, alphaTest, colorMask[4], depthMask;
-    GLfloat clearColor[4];
 };
 
 void Save(SavedState& s) {
     gl.GetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &s.drawFb);
-    gl.GetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &s.readFb);
     gl.GetIntegerv(GL_VIEWPORT, s.viewport);
     gl.GetIntegerv(GL_SCISSOR_BOX, s.scissorBox);
     gl.GetIntegerv(GL_CURRENT_PROGRAM, &s.program);
@@ -400,12 +403,6 @@ void Save(SavedState& s) {
     gl.GetIntegerv(GL_BLEND_DST_ALPHA, &s.blendDstA);
     gl.GetIntegerv(GL_BLEND_EQUATION_RGB, &s.blendEqRgb);
     gl.GetIntegerv(GL_BLEND_EQUATION_ALPHA, &s.blendEqA);
-    gl.GetIntegerv(GL_UNPACK_ALIGNMENT, &s.unpackAlign);
-    gl.GetIntegerv(GL_UNPACK_ROW_LENGTH, &s.unpackRowLength);
-    gl.GetIntegerv(GL_UNPACK_SKIP_ROWS, &s.unpackSkipRows);
-    gl.GetIntegerv(GL_UNPACK_SKIP_PIXELS, &s.unpackSkipPixels);
-    gl.GetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &s.unpackBuffer);
-    gl.GetIntegerv(GL_READ_BUFFER, &s.readBuffer);
     s.scissor = gl.IsEnabled(GL_SCISSOR_TEST);
     s.blend = gl.IsEnabled(GL_BLEND);
     s.depth = gl.IsEnabled(GL_DEPTH_TEST);
@@ -419,15 +416,12 @@ void Save(SavedState& s) {
     GLint dm;
     gl.GetIntegerv(GL_DEPTH_WRITEMASK, &dm);
     s.depthMask = dm ? GL_TRUE : GL_FALSE;
-    gl.GetFloatv(GL_COLOR_CLEAR_VALUE, s.clearColor);
 }
 
 void SetCap(GLenum cap, GLboolean on) { on ? gl.Enable(cap) : gl.Disable(cap); }
 
 void Restore(const SavedState& s) {
     gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, s.drawFb);
-    gl.BindFramebuffer(GL_READ_FRAMEBUFFER, s.readFb);
-    gl.ReadBuffer(s.readBuffer);
     gl.Viewport(s.viewport[0], s.viewport[1], s.viewport[2], s.viewport[3]);
     gl.Scissor(s.scissorBox[0], s.scissorBox[1], s.scissorBox[2], s.scissorBox[3]);
     gl.UseProgram(s.program);
@@ -439,11 +433,6 @@ void Restore(const SavedState& s) {
     gl.ActiveTexture(s.activeTex);
     gl.BlendFuncSeparate(s.blendSrcRgb, s.blendDstRgb, s.blendSrcA, s.blendDstA);
     gl.BlendEquationSeparate(s.blendEqRgb, s.blendEqA);
-    gl.PixelStorei(GL_UNPACK_ALIGNMENT, s.unpackAlign);
-    gl.PixelStorei(GL_UNPACK_ROW_LENGTH, s.unpackRowLength);
-    gl.PixelStorei(GL_UNPACK_SKIP_ROWS, s.unpackSkipRows);
-    gl.PixelStorei(GL_UNPACK_SKIP_PIXELS, s.unpackSkipPixels);
-    gl.BindBuffer(GL_PIXEL_UNPACK_BUFFER, s.unpackBuffer);
     SetCap(GL_SCISSOR_TEST, s.scissor);
     SetCap(GL_BLEND, s.blend);
     SetCap(GL_DEPTH_TEST, s.depth);
@@ -453,8 +442,43 @@ void Restore(const SavedState& s) {
     if (g_compat) SetCap(0x0BC0, s.alphaTest);
     gl.ColorMask(s.colorMask[0], s.colorMask[1], s.colorMask[2], s.colorMask[3]);
     gl.DepthMask(s.depthMask);
-    gl.ClearColor(s.clearColor[0], s.clearColor[1], s.clearColor[2], s.clearColor[3]);
 }
+
+// Texture uploads: the game's pixel-unpack settings are saved and restored around them, only when one happens.
+struct UnpackGuard {
+    GLint align, rowLength, skipRows, skipPixels, buffer;
+    UnpackGuard() {
+        gl.GetIntegerv(GL_UNPACK_ALIGNMENT, &align);
+        gl.GetIntegerv(GL_UNPACK_ROW_LENGTH, &rowLength);
+        gl.GetIntegerv(GL_UNPACK_SKIP_ROWS, &skipRows);
+        gl.GetIntegerv(GL_UNPACK_SKIP_PIXELS, &skipPixels);
+        gl.GetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &buffer);
+        gl.BindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+        gl.PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        gl.PixelStorei(GL_UNPACK_SKIP_ROWS, 0);
+        gl.PixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+    }
+    ~UnpackGuard() {
+        gl.PixelStorei(GL_UNPACK_ALIGNMENT, align);
+        gl.PixelStorei(GL_UNPACK_ROW_LENGTH, rowLength);
+        gl.PixelStorei(GL_UNPACK_SKIP_ROWS, skipRows);
+        gl.PixelStorei(GL_UNPACK_SKIP_PIXELS, skipPixels);
+        gl.BindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer);
+    }
+};
+
+// Reading from the window (screen-copy fallback): the read framebuffer and buffer are restored afterwards.
+struct ReadGuard {
+    GLint fb, buffer;
+    ReadGuard() {
+        gl.GetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &fb);
+        gl.GetIntegerv(GL_READ_BUFFER, &buffer);
+    }
+    ~ReadGuard() {
+        gl.BindFramebuffer(GL_READ_FRAMEBUFFER, fb);
+        gl.ReadBuffer(buffer);
+    }
+};
 
 // ---------------------------------------------------------------------------
 // Drawing helpers. Screen coordinates are pixels with a top-left origin.
@@ -537,9 +561,9 @@ void InitFont() {
         stbtt_BakeFontBitmap(g_fontData.data(), 0, kBakePx, bitmap.data(), kAtlasW, kAtlasH, 32, 96, g_glyphs);
     }
     if (!g_fontTex) gl.GenTextures(1, &g_fontTex);
+    UnpackGuard unpack;
     gl.BindTexture(GL_TEXTURE_2D, g_fontTex);
     gl.PixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    gl.PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     gl.TexImage2D(GL_TEXTURE_2D, 0, GL_R8, kAtlasW, kAtlasH, 0, GL_RED, GL_UNSIGNED_BYTE, bitmap.data());
     SetTexFilter(false);
 }
@@ -628,6 +652,18 @@ void ImageWorker() {
     }
 }
 
+// Without touching GL: whether an image would draw (or needs uploading) this frame. Also schedules reloads.
+bool ImageWantsPass(const std::string& path) {
+    if (path.empty()) return false;
+    std::lock_guard<std::mutex> lock(g_imgMutex);
+    auto it = g_images.find(path);
+    if (it == g_images.end()) return true;  // first use: GetImage starts the load
+    const ImageEntry& e = it->second;
+    if (e.pendingReady) return true;
+    if (NowSeconds() - e.lastCheck > 0.25 && !e.loading) return true;  // time to check the file again
+    return e.tex && e.visible;
+}
+
 // Returns the texture for a path (0 while it is not loaded yet).
 ImageEntry* GetImage(const std::string& path) {
     if (path.empty()) return nullptr;
@@ -654,12 +690,9 @@ ImageEntry* GetImage(const std::string& path) {
     if (e.pendingReady) {
         e.pendingReady = false;
         if (!e.tex) gl.GenTextures(1, &e.tex);
+        UnpackGuard unpack;
         gl.BindTexture(GL_TEXTURE_2D, e.tex);
-        gl.BindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
         gl.PixelStorei(GL_UNPACK_ALIGNMENT, 4);
-        gl.PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-        gl.PixelStorei(GL_UNPACK_SKIP_ROWS, 0);
-        gl.PixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
         gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, e.pendingW, e.pendingH, 0, GL_RGBA, GL_UNSIGNED_BYTE, e.pending.data());
         e.w = e.pendingW;
         e.h = e.pendingH;
@@ -700,6 +733,7 @@ bool PrepareFrameSource() {
         }
     }
     // Fallback: copy the on-screen part of the presented frame.
+    g_perf.fallbackFrames++;
     int sx0 = std::max(rt.destX, 0), sy0 = std::max(rt.destY, 0);
     int sx1 = std::min(rt.destX + rt.destW, rt.screenW), sy1 = std::min(rt.destY + rt.destH, rt.screenH);
     int w = sx1 - sx0, h = sy1 - sy0;
@@ -707,11 +741,12 @@ bool PrepareFrameSource() {
     if (!g_fallbackTex) gl.GenTextures(1, &g_fallbackTex);
     gl.BindTexture(GL_TEXTURE_2D, g_fallbackTex);
     if (w != g_fallbackW || h != g_fallbackH) {
-        gl.BindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+        UnpackGuard unpack;
         gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
         g_fallbackW = w;
         g_fallbackH = h;
     }
+    ReadGuard read;
     gl.BindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     gl.ReadBuffer(GL_BACK);
     gl.CopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, sx0, rt.screenH - sy1, w, h);
@@ -747,7 +782,14 @@ std::string StripAnchor(const std::string& a) {
 void RelativeCoords(const std::string& type, int relX, int relY, int w, int h, int cw, int ch, int& outX, int& outY) {
     std::string anchor = StripAnchor(type);
     char c = anchor.empty() ? '\0' : anchor[0];
-    if (c == 't') {
+    // topCenter / bottomCenter are Linux-port additions (centred horizontally, offset from the edge).
+    if (anchor == "topCenter") {
+        outX = (cw - w) / 2 + relX;
+        outY = relY;
+    } else if (anchor == "bottomCenter") {
+        outX = (cw - w) / 2 + relX;
+        outY = ch - h - relY;
+    } else if (c == 't') {
         outY = relY;
         outX = (anchor == "topLeft") ? relX : cw - w - relX;
     } else if (c == 'c') {
@@ -770,7 +812,10 @@ void ImageCoords(const std::string& type, int relX, int relY, int w, int h, int&
     int cw = viewport ? rt.destW : rt.screenW, ch = viewport ? rt.destH : rt.screenH;
     int ax = 0, ay = 0;
     char c = a.empty() ? '\0' : a[0];
-    if (c == 't') {
+    if (a == "topCenter" || a == "bottomCenter") {
+        ax = (cw - w) / 2;
+        ay = (a == "topCenter") ? 0 : ch - h;
+    } else if (c == 't') {
         ax = (a == "topLeft") ? 0 : cw - w;
     } else if (c == 'c') {
         ax = (cw - w) / 2;
@@ -942,7 +987,29 @@ struct MirrorInstance {
     int w = 0, h = 0;
     double lastCapture = -1;
     int lastGameW = 0, lastGameH = 0;
+    // Whether the last capture matched any pixel, from an occlusion query read without waiting.
+    GLuint query = 0;
+    bool queryPending = false;
+    bool hasContent = true;
 };
+
+// Reads a finished "any samples passed" query; never blocks.
+void PollMirrorQuery(MirrorInstance& inst) {
+    if (!inst.queryPending) return;
+    GLint ready = 0;
+    gl.GetQueryObjectiv(inst.query, GL_QUERY_RESULT_AVAILABLE, &ready);
+    if (!ready) return;
+    GLint any = 0;
+    gl.GetQueryObjectiv(inst.query, GL_QUERY_RESULT, &any);
+    inst.hasContent = any != 0;
+    inst.queryPending = false;
+}
+
+bool MirrorCaptureDue(const MirrorConfig& m, const MirrorInstance& inst) {
+    const Runtime& rt = g_rt;
+    return m.fps <= 0 || inst.lastCapture < 0 || NowSeconds() - inst.lastCapture >= 1.0 / m.fps || inst.lastGameW != rt.gameW ||
+           inst.lastGameH != rt.gameH;
+}
 std::map<std::string, MirrorInstance> g_mirrors;
 std::map<std::string, bool> g_capturedThisFrame;
 
@@ -969,8 +1036,8 @@ void CaptureMirror(const MirrorConfig& m, MirrorInstance& inst) {
         gl.GenTextures(1, &inst.tex);
     }
     if (inst.w != fw || inst.h != fh) {
+        UnpackGuard unpack;
         gl.BindTexture(GL_TEXTURE_2D, inst.tex);
-        gl.BindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
         gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, fw, fh, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
         SetTexFilter(true);
         gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, inst.fbo);
@@ -980,8 +1047,11 @@ void CaptureMirror(const MirrorConfig& m, MirrorInstance& inst) {
     }
     gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, inst.fbo);
     gl.Viewport(0, 0, fw, fh);
+    GLfloat savedClear[4];
+    gl.GetFloatv(GL_COLOR_CLEAR_VALUE, savedClear);
     gl.ClearColor(0, 0, 0, 0);
     gl.Clear(GL_COLOR_BUFFER_BIT);
+    gl.ClearColor(savedClear[0], savedClear[1], savedClear[2], savedClear[3]);
 
     int savedW = g_targetW, savedH = g_targetH;
     bool savedTL = g_targetTopLeft;
@@ -1009,6 +1079,12 @@ void CaptureMirror(const MirrorConfig& m, MirrorInstance& inst) {
     // Later inputs are layered over earlier ones; unmatched pixels are transparent.
     gl.Enable(GL_BLEND);
     gl.BlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    bool counting = !m.rawOutput && !inst.queryPending;
+    if (counting) {
+        if (!inst.query) gl.GenQueries(1, &inst.query);
+        gl.BeginQuery(GL_ANY_SAMPLES_PASSED, inst.query);
+    }
+    if (m.rawOutput) inst.hasContent = true;
     for (auto& in : m.inputs) {
         int cx, cy;
         RelativeCoords(in.relativeTo, in.x, in.y, m.captureWidth, m.captureHeight, rt.gameW, rt.gameH, cx, cy);
@@ -1017,6 +1093,10 @@ void CaptureMirror(const MirrorConfig& m, MirrorInstance& inst) {
                    static_cast<float>(m.captureHeight), u0, vb, u1, vt);
         Quad(static_cast<float>(bt), static_cast<float>(bt), static_cast<float>(m.captureWidth), static_cast<float>(m.captureHeight), u0,
              vb, u1, vt);
+    }
+    if (counting) {
+        gl.EndQuery(GL_ANY_SAMPLES_PASSED);
+        inst.queryPending = true;
     }
     gl.BlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -1032,8 +1112,7 @@ void DrawMirror(const MirrorConfig& m, const MirrorOutput& out) {
     const Runtime& rt = g_rt;
     MirrorInstance& inst = g_mirrors[m.name];
     double now = NowSeconds();
-    bool due = m.fps <= 0 || inst.lastCapture < 0 || now - inst.lastCapture >= 1.0 / m.fps || inst.lastGameW != rt.gameW ||
-               inst.lastGameH != rt.gameH;
+    bool due = MirrorCaptureDue(m, inst);
     if (due && !g_capturedThisFrame[m.name]) {
         CaptureMirror(m, inst);
         inst.lastCapture = now;
@@ -1041,7 +1120,8 @@ void DrawMirror(const MirrorConfig& m, const MirrorOutput& out) {
         inst.lastGameH = rt.gameH;
         g_capturedThisFrame[m.name] = true;
     }
-    if (!inst.tex) return;
+    PollMirrorQuery(inst);
+    if (!inst.tex || !inst.hasContent) return;
 
     float sx = out.separateScale ? out.scaleX : out.scale;
     float sy = out.separateScale ? out.scaleY : out.scale;
@@ -1186,6 +1266,40 @@ double NormalizeDeg(double a) {
     return a;
 }
 
+// Whether the Ninjabrain panel should show this frame. Cheap (no copies of the tables), so it can decide
+// whether the overlay pass runs at all. Also tracks entering a world: only measurements taken in the current
+// world count, and entering one clears the hotkey's show/hide choice.
+bool NinjabrainPanelVisible() {
+    Runtime& rt = g_rt;
+    const NinjabrainOverlayConfig& nb = rt.cfg.ninjabrain;
+    if (!nb.enabled) return false;
+    static double worldEnteredAt = 0;
+    static bool wasInWorld = false;
+    const std::string& state = GetGameStateRef();
+    bool inWorld = state.empty() || state.compare(0, 7, "inworld") == 0;
+    if (inWorld && !wasInWorld) {
+        worldEnteredAt = NowSeconds();
+        rt.nbOverride = 0;
+    }
+    wasInWorld = inWorld;
+    if (!nb.allowedModes.empty() &&
+        std::find(nb.allowedModes.begin(), nb.allowedModes.end(), rt.currentMode) == nb.allowedModes.end()) {
+        return false;
+    }
+    if (nb.hideInMenus && !inWorld) return false;
+    if (rt.nbOverride < 0) return false;
+    bool forced = rt.nbOverride > 0;
+    NinjabrainFlags f = NinjabrainFlagsNow();
+    if (nb.showOnlyAfterMeasurement && !forced) {
+        double since = state.empty() ? 0 : worldEnteredAt;
+        if (f.lastMeasurement <= 0 || f.lastMeasurement < since) return false;
+    }
+    if (!f.connected && !f.hasData) return false;
+    if (!f.hasData && !nb.alwaysShow && !forced) return false;
+    if (nb.hideIfStale && f.hasData && !forced && NowSeconds() - f.lastUpdate > nb.hideIfStaleDelaySeconds) return false;
+    return true;
+}
+
 bool DrawNinjabrainPanelImpl();
 
 void DrawNinjabrainPanel() { g_rt.nbDisplayed = DrawNinjabrainPanelImpl(); }
@@ -1193,36 +1307,9 @@ void DrawNinjabrainPanel() { g_rt.nbDisplayed = DrawNinjabrainPanelImpl(); }
 bool DrawNinjabrainPanelImpl() {
     Runtime& rt = g_rt;
     const NinjabrainOverlayConfig& nb = rt.cfg.ninjabrain;
-    if (!nb.enabled) return false;
-    if (!nb.allowedModes.empty() &&
-        std::find(nb.allowedModes.begin(), nb.allowedModes.end(), rt.currentMode) == nb.allowedModes.end()) {
-        return false;
-    }
-    // Track when the current world was entered, so only measurements taken in it count. Entering a world
-    // also clears the hotkey's show/hide choice.
-    static double worldEnteredAt = 0;
-    static bool wasInWorld = false;
-    std::string state = GetGameState();
-    bool inWorld = state.empty() || state.rfind("inworld", 0) == 0;
-    if (inWorld && !wasInWorld) {
-        worldEnteredAt = NowSeconds();
-        rt.nbOverride = 0;
-    }
-    wasInWorld = inWorld;
-    if (nb.hideInMenus && !inWorld) return false;
-    if (rt.nbOverride < 0) return false;
-    bool forced = rt.nbOverride > 0;
-
+    if (!NinjabrainPanelVisible()) return false;
     NinjabrainData d = NinjabrainSnapshot();
-    if (nb.showOnlyAfterMeasurement && !forced) {
-        double since = state.empty() ? 0 : worldEnteredAt;
-        if (d.lastMeasurement <= 0 || d.lastMeasurement < since) return false;
-    }
     bool hasResult = d.resultType != "NONE" && d.resultType != "";
-    bool hasData = hasResult || d.hasBlindResult || !d.messages.empty();
-    if (!d.connected && !hasData) return false;
-    if (!hasData && !nb.alwaysShow && !forced) return false;
-    if (nb.hideIfStale && hasData && !forced && NowSeconds() - d.lastUpdate > nb.hideIfStaleDelaySeconds) return false;
 
     const float op = nb.overlayOpacity;
     const float sc = nb.overlayScale > 0.01f ? nb.overlayScale : 1.0f;
@@ -1479,46 +1566,6 @@ void DrawPanel(const std::vector<std::string>& lines, float x, float y, float px
     }
 }
 
-void DrawInfoPanel() {
-    const Runtime& rt = g_rt;
-    const Config& cfg = rt.cfg;
-    std::vector<std::string> lines;
-    lines.push_back("Toolscreen " TS_VERSION " for Linux");
-    lines.push_back("Config: " + ConfigPath());
-    std::string state = GetGameState();
-    lines.push_back("Mode: " + rt.currentMode + "   Game " + std::to_string(rt.gameW) + "x" + std::to_string(rt.gameH) + "   Screen " +
-                    std::to_string(rt.screenW) + "x" + std::to_string(rt.screenH) + "   State: " + (state.empty() ? "(no wpstateout.txt)" : state));
-    if (!rt.cfgError.empty()) lines.push_back("Error: " + rt.cfgError);
-    if (cfg.ninjabrain.enabled) {
-        NinjabrainData nbd = NinjabrainSnapshot();
-        lines.push_back(std::string("Ninjabrain Bot API: ") + (nbd.connected ? "connected" : "not connected - enable the API in Ninjabrain Bot's settings") +
-                        "  (" + cfg.ninjabrain.apiBaseUrl + ")");
-    } else {
-        lines.push_back("Ninjabrain Bot panel: off ([ninjabrainOverlay] enabled = false)");
-    }
-    lines.push_back("");
-    lines.push_back("Hotkeys:");
-    for (auto& h : cfg.hotkeys) {
-        std::string l = "  " + ComboName(h.keys) + "  ->  " + h.secondaryMode;
-        if (h.triggerOnHold) l += " (hold)";
-        if (h.triggerOnRelease) l += " (on release)";
-        lines.push_back(l);
-    }
-    for (auto& s : cfg.sensitivityHotkeys) {
-        char buf[64];
-        snprintf(buf, sizeof(buf), "%.2f", s.sensitivity);
-        lines.push_back("  " + ComboName(s.keys) + "  ->  sensitivity " + buf + (s.toggle ? " (toggle)" : " (hold)"));
-    }
-    if (!cfg.imageOverlaysHotkey.empty()) lines.push_back("  " + ComboName(cfg.imageOverlaysHotkey) + "  ->  toggle image overlays");
-    if (!cfg.ninjabrainOverlayHotkey.empty()) lines.push_back("  " + ComboName(cfg.ninjabrainOverlayHotkey) + "  ->  toggle Ninjabrain overlay");
-    lines.push_back("");
-    lines.push_back("E  edit config.toml      O  open config folder");
-    lines.push_back("R  reload config         " + ComboName(cfg.guiHotkey) + " / Esc  close");
-    lines.push_back("The config reloads automatically when the file is saved.");
-    float px = std::max(16.0f, rt.screenH / 50.0f);
-    DrawPanel(lines, px, px, px);
-}
-
 void DrawToast() {
     double now = NowSeconds();
     if (now > g_toastUntil || g_toast.empty()) return;
@@ -1531,6 +1578,8 @@ void DrawToast() {
 // ---------------------------------------------------------------------------
 // Public entry points
 // ---------------------------------------------------------------------------
+std::string VkComboName(const std::vector<int>& keys) { return ComboName(keys); }
+
 void RenderNoteGameTextureAttach(unsigned int tex) { g_gameTex = tex; }
 
 void RenderNoteTextureImage(unsigned int tex, int w, int h) { g_texSizes[tex] = {w, h}; }
@@ -1591,6 +1640,54 @@ void RenderInitIfNeeded() {
     }
 }
 
+// Whether the mode's sources need the overlay pass this frame: a mirror capture is due, a mirror matched
+// something last time, or an image is visible or loading.
+bool SourcesNeedPass(const ModeConfig* mode) {
+    if (!mode) return false;
+    const Runtime& rt = g_rt;
+    auto mirrorNeeds = [](const MirrorConfig* m) {
+        if (!m) return false;
+        MirrorInstance& inst = g_mirrors[m->name];
+        if (MirrorCaptureDue(*m, inst)) return true;
+        PollMirrorQuery(inst);
+        return inst.tex && inst.hasContent;
+    };
+    for (auto& src : mode->sources) {
+        if (src.type == "Mirror") {
+            if (mirrorNeeds(FindMirror(src.id))) return true;
+        } else if (src.type == "MirrorGroup") {
+            for (auto& g : rt.cfg.mirrorGroups) {
+                if (g.name != src.id) continue;
+                for (auto& item : g.items) {
+                    if (item.enabled && mirrorNeeds(FindMirror(item.mirrorId))) return true;
+                }
+            }
+        } else if (src.type == "Image" && rt.imagesVisible) {
+            for (auto& im : rt.cfg.images) {
+                if (im.name != src.id) continue;
+                if (im.name == "Ninjabrain Bot" && !rt.ninjabrainVisible) continue;
+                if (ImageWantsPass(im.path)) return true;
+            }
+        }
+    }
+    return false;
+}
+
+// Stage timer for TOOLSCREEN_PERF.
+struct StageClock {
+    bool on;
+    double t;
+    explicit StageClock(bool enabled) : on(enabled), t(enabled ? NowSeconds() : 0) {}
+    void Mark(int stage) {
+        if (!on) return;
+        double now = NowSeconds();
+        double ms = (now - t) * 1000.0;
+        g_perf.stage[stage] += ms;
+        g_perf.stageMax[stage] = std::max(g_perf.stageMax[stage], ms);
+        t = now;
+    }
+};
+
 void RenderFrame() {
     Runtime& rt = g_rt;
     if (rt.screenW <= 0 || rt.screenH <= 0) return;
@@ -1599,14 +1696,20 @@ void RenderFrame() {
     bool letterbox = rt.destX > 0 || rt.destY > 0 || rt.destX + rt.destW < rt.screenW || rt.destY + rt.destH < rt.screenH;
     bool eyezoom = mode && mode->id == "EyeZoom";
     bool haveSources = mode && !mode->sources.empty();
-    bool text = rt.guiOpen || NowSeconds() < g_toastUntil || rt.cfg.ninjabrain.enabled;
-    if (!letterbox && !eyezoom && !haveSources && !text && !(mode && mode->border.enabled) && g_ready) return;
+    bool nbVisible = NinjabrainPanelVisible();
+    if (!nbVisible) rt.nbDisplayed = false;
+    // Skip the whole pass (and its GL state save/restore) in frames where nothing would be drawn.
+    if (g_ready && !letterbox && !eyezoom && !rt.guiOpen && !nbVisible && NowSeconds() >= g_toastUntil &&
+        !(mode && mode->border.enabled && rt.gameSizeFaked) && !SourcesNeedPass(mode)) {
+        return;
+    }
 
     // Keep the font and config in step: a reloaded config may name a different font.
     static std::string fontKey;
     std::string wantFont = rt.cfg.eyezoom.textFontPath + "|" + rt.cfg.fontPath;
 
     // Save first: one-time initialisation binds objects of its own, which must not leak into the game.
+    StageClock clk(PerfEnabled());
     SavedState saved;
     if (!g_failed) {
         if (!gl.GetIntegerv && !LoadGl()) g_failed = true;
@@ -1621,6 +1724,29 @@ void RenderFrame() {
     if (fontKey != wantFont) {
         if (!fontKey.empty()) InitFont();
         fontKey = wantFont;
+    }
+
+    // GPU time of the overlay pass, read back two frames later so the query never stalls.
+    static GLuint queries[3] = {0, 0, 0};
+    static int qIndex = 0;
+    static bool qUsed[3] = {false, false, false};
+    bool perf = PerfEnabled();
+    if (perf) {
+        g_perf.renderedFrames++;
+        if (!queries[0]) gl.GenQueries(3, queries);
+        int readIdx = (qIndex + 1) % 3;
+        if (qUsed[readIdx]) {
+            GLint ready = 0;
+            gl.GetQueryObjectiv(queries[readIdx], GL_QUERY_RESULT_AVAILABLE, &ready);
+            if (ready) {
+                GLuint64 ns = 0;
+                gl.GetQueryObjectui64v(queries[readIdx], GL_QUERY_RESULT, &ns);
+                g_perf.gpuMs += ns / 1e6;
+                g_perf.gpuSamples++;
+                qUsed[readIdx] = false;
+            }
+        }
+        if (!qUsed[qIndex]) gl.BeginQuery(GL_TIME_ELAPSED, queries[qIndex]);
     }
 
     gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
@@ -1645,16 +1771,20 @@ void RenderFrame() {
     g_targetTopLeft = true;
     g_capturedThisFrame.clear();
 
+    clk.Mark(0);
     if (mode) {
         bool needSource = eyezoom || haveSources;
         if (needSource) PrepareFrameSource();
+        clk.Mark(1);
         gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
         if (letterbox) DrawLetterbox(*mode);
         if (mode->border.enabled && rt.gameSizeFaked) {
             Outline(static_cast<float>(rt.destX), static_cast<float>(rt.destY), static_cast<float>(rt.destW), static_cast<float>(rt.destH),
                     static_cast<float>(mode->border.width), static_cast<float>(mode->border.radius), 0, mode->border.color);
         }
+        clk.Mark(2);
         if (eyezoom) DrawEyeZoom(*mode);
+        clk.Mark(3);
         // Sources draw in the order the mode lists them; mirrors need the game frame, images do not.
         for (auto& src : mode->sources) {
             if (src.type == "Mirror" && g_src.tex) {
@@ -1670,9 +1800,24 @@ void RenderFrame() {
             }
         }
     }
+    clk.Mark(4);
     DrawNinjabrainPanel();
-    if (rt.guiOpen) DrawInfoPanel();
-    else DrawToast();
+    clk.Mark(5);
+    if (rt.guiOpen) {
+        // The GUI library uploads its own textures; some mods leave a pixel-unpack buffer bound, which would make
+        // those uploads read garbage (an invisible or black editor).
+        UnpackGuard unpack;
+        GuiRender();
+    } else {
+        DrawToast();
+    }
+    clk.Mark(6);
 
+    if (perf && !qUsed[qIndex]) {
+        gl.EndQuery(GL_TIME_ELAPSED);
+        qUsed[qIndex] = true;
+        qIndex = (qIndex + 1) % 3;
+    }
     Restore(saved);
+    clk.Mark(7);
 }

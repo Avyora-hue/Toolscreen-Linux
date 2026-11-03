@@ -4,3 +4,5 @@
 /installer/build/
 # downloaded build tools
 /.tools/
+# practice datapack: kept locally, not published
+/practice/OneShotPractice/

@@ -1,0 +1,66 @@
+# ---- OneShot (bow one-shot on the Ender Dragon) --------------------------------------------------
+# Paste into ~/.config/toolscreen/config.toml (anywhere after the top-level settings).
+# O toggles the "OneShot" mode: the game stays full size, and two mirrors appear:
+#   "OneShot Aim"  - the area around the crosshair, magnified 3x on the left, for lining up the head
+#   "Dragon HP"    - the dragon's boss health bar, doubled, just below the crosshair
+# The boss-bar numbers assume GUI scale 2: the bar is 182x5 GUI pixels, 12 GUI pixels from the top.
+# For another GUI scale g use captureWidth = 182*g, captureHeight = 5*g and input y = 12*g.
+
+[[hotkey]]
+keys = [ 79 ]
+mainMode = 'Fullscreen'
+secondaryMode = 'OneShot'
+debounce = 100
+altSecondaryModes = []
+triggerOnHold = false
+triggerOnRelease = false
+    [hotkey.conditions]
+    exclusions = [ 114 ]
+    gameState = []
+
+[[mirror]]
+name = 'OneShot Aim'
+captureWidth = 160
+captureHeight = 90
+input = [ { relativeTo = 'centerViewport', x = 0, y = 0 } ]
+output = { relativeTo = 'centerScreen', x = -660, y = 0, scale = 3.0, separateScale = false, scaleX = 1.0, scaleY = 1.0 }
+rawOutput = true
+colors = { targetColors = [], output = [ 255, 255, 255 ], border = [ 0, 0, 0 ] }
+fps = 0
+opacity = 1.0
+    [mirror.border]
+    type = 'Static'
+    staticShape = 'Rectangle'
+    staticColor = [ 122, 21, 162 ]
+    staticThickness = 2
+
+[[mirror]]
+name = 'Dragon HP'
+captureWidth = 364
+captureHeight = 10
+input = [ { relativeTo = 'topCenterViewport', x = 0, y = 24 } ]
+output = { relativeTo = 'centerScreen', x = 0, y = 140, scale = 2.0, separateScale = false, scaleX = 1.0, scaleY = 1.0 }
+rawOutput = true
+colors = { targetColors = [], output = [ 255, 255, 255 ], border = [ 0, 0, 0 ] }
+fps = 0
+opacity = 1.0
+    [mirror.border]
+    type = 'Dynamic'
+    dynamicThickness = 0
+
+[[mode]]
+id = 'OneShot'
+width = 'screenWidth'
+height = 'screenHeight'
+sources = [ { type = 'Mirror', id = 'OneShot Aim' }, { type = 'Mirror', id = 'Dragon HP' } ]
+border = { enabled = false, color = [ 255, 255, 255 ], width = 4, radius = 0 }
+stretch = { enabled = false, x = 0, y = 0, width = 0, height = 0 }
+# Set to true (and pick a value) for steadier aim while the mode is on.
+sensitivityOverrideEnabled = false
+modeSensitivity = 1.0
+modeSensitivityX = 1.0
+modeSensitivityY = 1.0
+separateXYSensitivity = false
+    [mode.background]
+    selectedMode = 'color'
+    color = [ 0, 0, 0 ]
