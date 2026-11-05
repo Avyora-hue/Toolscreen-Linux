@@ -533,11 +533,40 @@ void SetTexFilter(bool nearest) {
 // ---------------------------------------------------------------------------
 // Font (stb_truetype atlas)
 // ---------------------------------------------------------------------------
+// One baked glyph set. Large text scales the 64 px set; small text gets a set baked at its own pixel
+// height, because shrinking 64 px glyphs several times over with bilinear filtering blurs them.
+struct FontAtlas {
+    float bakePx = 0;
+    int w = 0, h = 0;
+    GLuint tex = 0;
+    stbtt_bakedchar glyphs[96];
+};
 constexpr float kBakePx = 64.0f;
-constexpr int kAtlasW = 1024, kAtlasH = 512;
-stbtt_bakedchar g_glyphs[96];
-GLuint g_fontTex = 0;
+constexpr float kExactBakeMaxPx = 40.0f;
+std::map<int, FontAtlas> g_fontAtlases;
 std::vector<unsigned char> g_fontData;
+
+bool BakeAtlas(FontAtlas& a, float px, int w, int h) {
+    std::vector<unsigned char> bitmap(static_cast<size_t>(w) * h);
+    if (stbtt_BakeFontBitmap(g_fontData.data(), 0, px, bitmap.data(), w, h, 32, 96, a.glyphs) <= 0) return false;
+    a.bakePx = px;
+    a.w = w;
+    a.h = h;
+    if (!a.tex) gl.GenTextures(1, &a.tex);
+    UnpackGuard unpack;
+    gl.BindTexture(GL_TEXTURE_2D, a.tex);
+    gl.PixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_R8, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, bitmap.data());
+    SetTexFilter(false);
+    return true;
+}
+
+void ClearFontAtlases() {
+    for (auto& [key, a] : g_fontAtlases) {
+        if (a.tex) gl.DeleteTextures(1, &a.tex);
+    }
+    g_fontAtlases.clear();
+}
 
 void InitFont() {
     std::string path = g_rt.cfg.eyezoom.textFontPath;
@@ -554,43 +583,66 @@ void InitFont() {
         }
     }
     if (g_fontData.empty()) g_fontData.assign(ts_font_ttf, ts_font_ttf + ts_font_ttf_size);
-    std::vector<unsigned char> bitmap(kAtlasW * kAtlasH);
-    if (stbtt_BakeFontBitmap(g_fontData.data(), 0, kBakePx, bitmap.data(), kAtlasW, kAtlasH, 32, 96, g_glyphs) <= 0 &&
-        g_fontData.data() != ts_font_ttf) {
+    ClearFontAtlases();
+    FontAtlas big;
+    if (!BakeAtlas(big, kBakePx, 1024, 512) && g_fontData.data() != ts_font_ttf) {
         g_fontData.assign(ts_font_ttf, ts_font_ttf + ts_font_ttf_size);
-        stbtt_BakeFontBitmap(g_fontData.data(), 0, kBakePx, bitmap.data(), kAtlasW, kAtlasH, 32, 96, g_glyphs);
+        BakeAtlas(big, kBakePx, 1024, 512);
     }
-    if (!g_fontTex) gl.GenTextures(1, &g_fontTex);
-    UnpackGuard unpack;
-    gl.BindTexture(GL_TEXTURE_2D, g_fontTex);
-    gl.PixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_R8, kAtlasW, kAtlasH, 0, GL_RED, GL_UNSIGNED_BYTE, bitmap.data());
-    SetTexFilter(false);
+    g_fontAtlases[0] = big;
 }
 
+// Rounds a small pixel height to the whole size its glyph set is baked at; large heights stay as given.
+float SnapFontPx(float px) { return px < kExactBakeMaxPx ? std::max(4.0f, std::round(px)) : px; }
+
+const FontAtlas& AtlasFor(float px) {
+    if (px >= kExactBakeMaxPx) return g_fontAtlases[0];
+    int key = static_cast<int>(SnapFontPx(px));
+    auto it = g_fontAtlases.find(key);
+    if (it != g_fontAtlases.end()) return it->second;
+    FontAtlas& a = g_fontAtlases[key];
+    if (!BakeAtlas(a, static_cast<float>(key), 512, 256)) {
+        g_fontAtlases.erase(key);
+        return g_fontAtlases[0];
+    }
+    return a;
+}
+
+// Width of s at pixel height px. Heights under 4 px are scale units (callers divide by them to fit a
+// box), so they are measured linearly on the 64 px set rather than snapped to a baked size.
 float TextWidth(const std::string& s, float px) {
+    if (px >= 4.0f) px = SnapFontPx(px);
+    const FontAtlas& a = px >= 4.0f ? AtlasFor(px) : g_fontAtlases[0];
     float x = 0;
     for (unsigned char ch : s) {
         if (ch < 32 || ch >= 128) ch = '?';
-        x += g_glyphs[ch - 32].xadvance;
+        x += a.glyphs[ch - 32].xadvance;
     }
-    return x * px / kBakePx;
+    return x * px / a.bakePx;
 }
 
-// Draws text with its top-left at (x,y); px is the font pixel height.
+// Draws text with its top-left at (x,y); px is the font pixel height. Small text is drawn from a glyph
+// set baked at that height and placed on whole pixels, so each glyph maps one texel to one pixel.
 void DrawText(const std::string& s, float x, float y, float px, const Color& c) {
     if (s.empty()) return;
+    px = SnapFontPx(px);
+    const FontAtlas& a = AtlasFor(px);
+    bool exact = a.bakePx == px;
+    if (exact) {
+        x = std::round(x);
+        y = std::round(y);
+    }
     UseProgram(g_text);
     gl.Uniform4f(g_text.loc("uColor"), c.r, c.g, c.b, c.a);
-    gl.BindTexture(GL_TEXTURE_2D, g_fontTex);
-    float scale = px / kBakePx;
-    float penX = 0, baseline = kBakePx * 0.8f;
+    gl.BindTexture(GL_TEXTURE_2D, a.tex);
+    float scale = px / a.bakePx;
+    float penX = 0, baseline = std::round(a.bakePx * 0.8f);
     std::vector<float> verts;
     verts.reserve(s.size() * 24);
     for (unsigned char ch : s) {
         if (ch < 32 || ch >= 128) ch = '?';
         stbtt_aligned_quad q;
-        stbtt_GetBakedQuad(g_glyphs, kAtlasW, kAtlasH, ch - 32, &penX, &baseline, &q, 1);
+        stbtt_GetBakedQuad(a.glyphs, a.w, a.h, ch - 32, &penX, &baseline, &q, 1);
         float x0 = x + q.x0 * scale, y0 = y + q.y0 * scale, x1 = x + q.x1 * scale, y1 = y + q.y1 * scale;
         float quad[] = {x0, y0, q.s0, q.t0, x1, y0, q.s1, q.t0, x1, y1, q.s1, q.t1, x0, y0, q.s0, q.t0, x1, y1, q.s1, q.t1, x0, y1, q.s0, q.t1};
         verts.insert(verts.end(), std::begin(quad), std::end(quad));
@@ -717,6 +769,21 @@ struct FrameSource {
     float originX = 0, originY = 0, scaleX = 1, scaleY = 1;
 } g_src;
 
+// Logs which frame source EyeZoom and mirrors read from, once per change of source or size.
+void LogFrameSourceChange(int kind, int texW, int texH) {
+    static int lastKind = 0, lastW = -1, lastH = -1, lastGameW = -1, lastGameH = -1;
+    const Runtime& rt = g_rt;
+    if (kind == lastKind && texW == lastW && texH == lastH && rt.gameW == lastGameW && rt.gameH == lastGameH) return;
+    lastKind = kind;
+    lastW = texW;
+    lastH = texH;
+    lastGameW = rt.gameW;
+    lastGameH = rt.gameH;
+    if (kind == 1) TsLog("frame source: game texture %dx%d", texW, texH);
+    else if (kind == 2) TsLog("frame source: screen copy (game texture %dx%d does not match game size %dx%d)", texW, texH, rt.gameW, rt.gameH);
+    else TsLog("frame source: screen copy (no game texture seen, game size %dx%d)", rt.gameW, rt.gameH);
+}
+
 bool PrepareFrameSource() {
     Runtime& rt = g_rt;
     g_src = FrameSource{};
@@ -729,8 +796,12 @@ bool PrepareFrameSource() {
             g_src.tex = g_gameTex;
             g_src.texW = w;
             g_src.texH = h;
+            LogFrameSourceChange(1, w, h);
             return true;
         }
+        LogFrameSourceChange(2, w, h);
+    } else {
+        LogFrameSourceChange(3, 0, 0);
     }
     // Fallback: copy the on-screen part of the presented frame.
     g_perf.fallbackFrames++;
@@ -778,6 +849,8 @@ std::string StripAnchor(const std::string& a) {
     if (a.size() > 6 && a.compare(a.size() - 6, 6, "Screen") == 0) return a.substr(0, a.size() - 6);
     return a;
 }
+
+}  // namespace
 
 void RelativeCoords(const std::string& type, int relX, int relY, int w, int h, int cw, int ch, int& outX, int& outY) {
     std::string anchor = StripAnchor(type);
@@ -827,6 +900,50 @@ void ImageCoords(const std::string& type, int relX, int relY, int w, int h, int&
     outX = ax + relX + (viewport ? rt.destX : 0);
     outY = ay + relY + (viewport ? rt.destY : 0);
 }
+
+// Inverse of RelativeCoords: the offset that places a w x h box with its top-left at (x, y).
+void RelativeCoordsInverse(const std::string& type, int x, int y, int w, int h, int cw, int ch, int& relX, int& relY) {
+    std::string anchor = StripAnchor(type);
+    char c = anchor.empty() ? '\0' : anchor[0];
+    if (anchor == "topCenter") {
+        relX = x - (cw - w) / 2;
+        relY = y;
+    } else if (anchor == "bottomCenter") {
+        relX = x - (cw - w) / 2;
+        relY = ch - h - y;
+    } else if (c == 't') {
+        relY = y;
+        relX = (anchor == "topLeft") ? x : cw - w - x;
+    } else if (c == 'c') {
+        relX = x - (cw - w) / 2;
+        relY = y - (ch - h) / 2;
+    } else if (c == 'p') {
+        relX = x - ((anchor == "pieLeft") ? cw - 92 : cw - 36);
+        relY = y - (ch - 220);
+    } else {
+        relY = ch - h - y;
+        relX = (anchor == "bottomRight") ? cw - w - x : x;
+    }
+}
+
+// Inverse of ImageCoords.
+void ImageCoordsInverse(const std::string& type, int x, int y, int w, int h, int& relX, int& relY) {
+    int ox = 0, oy = 0;
+    ImageCoords(type, 0, 0, w, h, ox, oy);
+    relX = x - ox;
+    relY = y - oy;
+}
+
+// Overlay rectangles for the on-screen editor (filled only while the editor is open).
+std::vector<EditRect> g_editRects;
+bool g_recordEdits = false;
+const std::vector<EditRect>& RenderEditRects() { return g_editRects; }
+
+void RecordEdit(EditKind kind, const std::string& name, float x, float y, float w, float h) {
+    if (g_recordEdits) g_editRects.push_back({kind, name, x, y, w, h});
+}
+
+namespace {
 
 // ---------------------------------------------------------------------------
 // Background and border
@@ -1108,7 +1225,9 @@ void CaptureMirror(const MirrorConfig& m, MirrorInstance& inst) {
 }
 
 // Draws one mirror with an output placement (already resolved for groups).
-void DrawMirror(const MirrorConfig& m, const MirrorOutput& out) {
+// Draws one mirror output; its screen box is recorded for the overlay editor (standalone mirrors) or
+// returned through box (mirrors drawn as part of a group), whether or not any pixel matched.
+void DrawMirror(const MirrorConfig& m, const MirrorOutput& out, float* box = nullptr) {
     const Runtime& rt = g_rt;
     MirrorInstance& inst = g_mirrors[m.name];
     double now = NowSeconds();
@@ -1121,7 +1240,7 @@ void DrawMirror(const MirrorConfig& m, const MirrorOutput& out) {
         g_capturedThisFrame[m.name] = true;
     }
     PollMirrorQuery(inst);
-    if (!inst.tex || !inst.hasContent) return;
+    if (!inst.tex) return;
 
     float sx = out.separateScale ? out.scaleX : out.scale;
     float sy = out.separateScale ? out.scaleY : out.scale;
@@ -1141,6 +1260,15 @@ void DrawMirror(const MirrorConfig& m, const MirrorOutput& out) {
         x += rt.destX;
         y += rt.destY;
     }
+    if (box) {
+        box[0] = static_cast<float>(x);
+        box[1] = static_cast<float>(y);
+        box[2] = static_cast<float>(outW);
+        box[3] = static_cast<float>(outH);
+    } else {
+        RecordEdit(EditKind::Mirror, m.name, static_cast<float>(x), static_cast<float>(y), static_cast<float>(outW), static_cast<float>(outH));
+    }
+    if (!inst.hasContent) return;
 
     UseProgram(g_mirrorOut);
     gl.BindTexture(GL_TEXTURE_2D, inst.tex);
@@ -1170,6 +1298,8 @@ void DrawMirrorGroup(const MirrorGroupConfig& g) {
         gx = static_cast<int>(g.output.relativeX * rt.screenW);
         gy = static_cast<int>(g.output.relativeY * rt.screenH);
     }
+    bool haveBox = false;
+    float gx0 = 0, gy0 = 0, gx1 = 0, gy1 = 0;
     for (auto& item : g.items) {
         if (!item.enabled) continue;
         const MirrorConfig* m = FindMirror(item.mirrorId);
@@ -1183,8 +1313,19 @@ void DrawMirrorGroup(const MirrorGroupConfig& g) {
         out.separateScale = true;
         out.scaleX = bsx * item.widthPercent;
         out.scaleY = bsy * item.heightPercent;
-        DrawMirror(*m, out);
+        float box[4] = {0, 0, 0, 0};
+        DrawMirror(*m, out, box);
+        if (box[2] > 0 && box[3] > 0) {
+            if (!haveBox) {
+                gx0 = box[0], gy0 = box[1], gx1 = box[0] + box[2], gy1 = box[1] + box[3];
+                haveBox = true;
+            } else {
+                gx0 = std::min(gx0, box[0]), gy0 = std::min(gy0, box[1]);
+                gx1 = std::max(gx1, box[0] + box[2]), gy1 = std::max(gy1, box[1] + box[3]);
+            }
+        }
     }
+    if (haveBox) RecordEdit(EditKind::Group, g.name, gx0, gy0, gx1 - gx0, gy1 - gy0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1205,6 +1346,7 @@ void DrawImageOverlay(const ImageConfig& im) {
     }
     int x, y;
     ImageCoords(im.relativeTo, im.x, im.y, dw, dh, x, y);
+    RecordEdit(EditKind::Image, im.name, static_cast<float>(x), static_cast<float>(y), static_cast<float>(dw), static_cast<float>(dh));
     if (im.bgEnabled) FillRect(static_cast<float>(x), static_cast<float>(y), static_cast<float>(dw), static_cast<float>(dh), im.bgColor, im.bgOpacity);
 
     UseProgram(g_image);
@@ -1246,7 +1388,7 @@ Color Gradient3(double p, const Color& low, const Color& mid, const Color& high)
     const Color& a = t < 0.5f ? low : mid;
     const Color& b = t < 0.5f ? mid : high;
     float k = t < 0.5f ? t * 2 : (t - 0.5f) * 2;
-    return Color{a.r + (b.r - a.r) * k, a.g + (b.g - a.g) * k, a.b + (b.b - a.b) * k, 1};
+    return Color{a.r + (b.r - a.r) * k, a.g + (b.g - a.g) * k, a.b + (b.b - a.b) * k, a.a + (b.a - a.a) * k};
 }
 
 struct NbCell {
@@ -1433,6 +1575,7 @@ bool DrawNinjabrainPanelImpl() {
     int px, py;
     ImageCoords(nb.relativeTo, nb.x, nb.y, static_cast<int>(w), static_cast<int>(h), px, py);
     float x0 = static_cast<float>(px), y = static_cast<float>(py);
+    RecordEdit(EditKind::Ninjabrain, "Ninjabrain Bot panel", x0, y, w, h);
 
     auto textAt = [&](const NbCell& c, float tx, float ty) {
         DrawText(c.text, tx, ty + (lineH - fs) / 2, fs, Faded(c.color, op));
@@ -1716,6 +1859,8 @@ void RenderFrame() {
     }
     if (g_failed) return;
     Save(saved);
+    g_recordEdits = rt.guiOpen;
+    if (!g_editRects.empty()) g_editRects.clear();
     RenderInitIfNeeded();
     if (!g_ready) {
         Restore(saved);

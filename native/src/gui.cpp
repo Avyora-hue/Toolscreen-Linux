@@ -31,6 +31,14 @@ bool g_dirty = false;
 std::string g_status;
 double g_statusUntil = 0;
 
+// On-screen overlay editor and interactive mirror creation state (see DrawOverlayEditor).
+bool g_editOverlays = false;
+bool g_aspectLock = true;
+int g_createStage = 0;  // 0 = off, 1 = drawing the capture area, 2 = drawing the destination
+bool g_createRelative = false;
+ImVec2 g_createSrc0, g_createSrc1, g_dragFrom;
+bool g_createDragging = false;
+
 // Key capture for hotkey fields.
 toml::table* g_capTable = nullptr;
 std::string g_capKey;
@@ -184,6 +192,64 @@ bool EdColor(const char* label, toml::table& t, const char* key, const char* opa
         Changed();
     }
     return changed;
+}
+
+// Colour with its opacity as an optional 4th element [r, g, b, a] (0-255), the form upstream 1.4 writes for
+// the Ninjabrain overlay colours; a fully opaque colour is written as [r, g, b].
+bool EdColorAlpha(const char* label, toml::table& t, const char* key, const float def[4]) {
+    float c[4] = {def[0], def[1], def[2], def[3]};
+    if (auto a = t[key].as_array()) {
+        for (size_t i = 0; i < 4 && i < a->size(); i++) {
+            if (auto v = (*a)[i].value<double>()) c[i] = static_cast<float>(*v) / 255.0f;
+        }
+        if (a->size() < 4) c[3] = 1.0f;
+    }
+    bool changed = ImGui::ColorEdit4(label, c, ImGuiColorEditFlags_AlphaBar);
+    if (changed) {
+        toml::array a;
+        for (int i = 0; i < 3; i++) a.push_back(static_cast<int64_t>(std::lround(c[i] * 255)));
+        if (c[3] < 0.999f) a.push_back(static_cast<int64_t>(std::lround(c[3] * 255)));
+        t.insert_or_assign(key, std::move(a));
+        Changed();
+    }
+    return changed;
+}
+
+// Path for display, with the home directory shown as ~ so screenshots and streams do not reveal the user name.
+std::string DisplayPath(const std::string& path) {
+    const char* home = getenv("HOME");
+    if (!home || !*home) return path;
+    std::string h = home;
+    while (h.size() > 1 && h.back() == '/') h.pop_back();
+    if (path.compare(0, h.size(), h) == 0 && (path.size() == h.size() || path[h.size()] == '/')) return "~" + path.substr(h.size());
+    return path;
+}
+
+// Built-in default of a Ninjabrain overlay colour, by its config key.
+const Color* NbColourField(const NinjabrainOverlayConfig& n, const char* key) {
+    static const std::pair<const char*, Color NinjabrainOverlayConfig::*> kFields[] = {
+        {"bgColor", &NinjabrainOverlayConfig::bgColor},
+        {"textColor", &NinjabrainOverlayConfig::textColor},
+        {"dataColor", &NinjabrainOverlayConfig::dataColor},
+        {"titleTextColor", &NinjabrainOverlayConfig::titleTextColor},
+        {"headerFillColor", &NinjabrainOverlayConfig::headerFillColor},
+        {"chromeColor", &NinjabrainOverlayConfig::chromeColor},
+        {"dividerColor", &NinjabrainOverlayConfig::dividerColor},
+        {"throwsBackgroundColor", &NinjabrainOverlayConfig::throwsBackgroundColor},
+        {"throwsTextColor", &NinjabrainOverlayConfig::throwsTextColor},
+        {"certaintyColor", &NinjabrainOverlayConfig::certaintyColor},
+        {"certaintyMidColor", &NinjabrainOverlayConfig::certaintyMidColor},
+        {"certaintyLowColor", &NinjabrainOverlayConfig::certaintyLowColor},
+        {"coordPositiveColor", &NinjabrainOverlayConfig::coordPositiveColor},
+        {"coordNegativeColor", &NinjabrainOverlayConfig::coordNegativeColor},
+        {"subpixelPositiveColor", &NinjabrainOverlayConfig::subpixelPositiveColor},
+        {"subpixelNegativeColor", &NinjabrainOverlayConfig::subpixelNegativeColor},
+        {"borderColor", &NinjabrainOverlayConfig::borderColor},
+    };
+    for (auto& [k, field] : kFields) {
+        if (strcmp(k, key) == 0) return &(n.*field);
+    }
+    return nullptr;
 }
 
 std::vector<int> GetKeys(toml::table& t, const char* key) {
@@ -588,6 +654,14 @@ void TabMirrors() {
     ImGui::TextWrapped("Mirrors copy part of the game (in game pixels) and show it elsewhere, magnified. With target colours, only "
                        "matching pixels are shown (in the output colour, or their own colour with passthrough). Raw shows the "
                        "region as it is.");
+    if (ImGui::Button("Create interactively")) {
+        g_createStage = 1;
+        g_createDragging = false;
+    }
+    ImGui::SameLine();
+    ImGui::Checkbox("Position relative to screen size", &g_createRelative);
+    ImGui::SameLine();
+    ImGui::TextDisabled("Draw the area to capture and where to show it, directly on screen.");
     TableList("mirror", "name", "Add mirror", &NewMirror, [](toml::table& m) {
         EdStr("Name", m, "name", "");
         EdInt("Capture width", m, "captureWidth", 50, 1, 4096);
@@ -836,13 +910,28 @@ void TabNinjabrain() {
     EdCombo("Coordinates", nb, "coordsDisplay", {"block", "chunk"}, "block");
     if (ImGui::TreeNode("Colours")) {
         EdBool("Background", nb, "bgEnabled", true);
-        EdColor("Background colour", nb, "bgColor");
-        EdColor("Text", nb, "textColor");
-        EdColor("Values", nb, "dataColor");
-        EdColor("Header", nb, "headerFillColor");
-        EdColor("High certainty", nb, "certaintyColor");
-        EdColor("Medium certainty", nb, "certaintyMidColor");
-        EdColor("Low certainty", nb, "certaintyLowColor");
+        // Each colour carries its own opacity (multiplied by the overall overlay opacity).
+        struct NbColour {
+            const char* label;
+            const char* key;
+        };
+        static const NbColour kNbColours[] = {
+            {"Background colour", "bgColor"},     {"Text", "textColor"},
+            {"Values", "dataColor"},              {"Title text", "titleTextColor"},
+            {"Header", "headerFillColor"},        {"Title bar", "chromeColor"},
+            {"Dividers", "dividerColor"},         {"Throws background", "throwsBackgroundColor"},
+            {"Throws text", "throwsTextColor"},   {"High certainty", "certaintyColor"},
+            {"Medium certainty", "certaintyMidColor"}, {"Low certainty", "certaintyLowColor"},
+            {"Positive coordinate", "coordPositiveColor"}, {"Negative coordinate", "coordNegativeColor"},
+            {"Subpixel +", "subpixelPositiveColor"}, {"Subpixel -", "subpixelNegativeColor"},
+            {"Border", "borderColor"},
+        };
+        static const NinjabrainOverlayConfig kDefaults;
+        for (const NbColour& nc : kNbColours) {
+            const Color* d = NbColourField(kDefaults, nc.key);
+            float def[4] = {d ? d->r : 1.0f, d ? d->g : 1.0f, d ? d->b : 1.0f, 1.0f};
+            EdColorAlpha(nc.label, nb, nc.key, def);
+        }
         ImGui::TreePop();
     }
     if (ImGui::TreeNode("Columns")) {
@@ -917,9 +1006,9 @@ void TabStatus() {
     const Runtime& rt = g_rt;
     std::string state = GetGameState();
     ImGui::Text("Toolscreen %s for Linux", TS_VERSION);
-    ImGui::Text("Config: %s", ConfigPath().c_str());
+    ImGui::Text("Config: %s", DisplayPath(ConfigPath()).c_str());
     ImGui::Text("Mode: %s   Game %dx%d   Screen %dx%d", rt.currentMode.c_str(), rt.gameW, rt.gameH, rt.screenW, rt.screenH);
-    ImGui::Text("Game state: %s", state.empty() ? "(no wpstateout.txt - install the state-output mod)" : state.c_str());
+    ImGui::Text("Game state: %s", state.empty() ? "(no game state - install the state-output or Hermes mod)" : state.c_str());
     if (rt.cfg.ninjabrain.enabled) ImGui::Text("Ninjabrain Bot API: %s", NinjabrainSnapshot().connected ? "connected" : "not connected");
     if (!rt.cfgError.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "Config error: %s", rt.cfgError.c_str());
     ImGui::Separator();
@@ -954,7 +1043,7 @@ void TabDefaults() {
     ImGui::TextWrapped("Recommended settings for this computer, built once by the installer from your Minecraft mouse "
                        "sensitivity and GUI scale and your screen resolution. The measuring FOV is recommended from the "
                        "resolution, not taken from your gameplay FOV.");
-    ImGui::TextDisabled("%s", path.c_str());
+    ImGui::TextDisabled("%s", DisplayPath(path).c_str());
     if (!recLoaded) {
         ImGui::Separator();
         if (!recError.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "recommended.toml has an error: %s", recError.c_str());
@@ -1046,6 +1135,355 @@ void TabDefaults() {
     ImGui::EndDisabled();
 }
 
+// ---------------------------------------------------------------------------
+// On-screen overlay editor (upstream 1.4 visual configurator): drag overlays to move them, drag the corner
+// handle to resize them; and interactive mirror creation (draw the capture area, then where to show it).
+// ---------------------------------------------------------------------------
+
+struct OverlayDrag {
+    bool active = false, resize = false;
+    EditRect start{EditKind::Mirror, "", 0, 0, 0, 0};
+    ImVec2 mouse0;
+    // Config values when the drag began.
+    double v0 = 0, v1 = 0, v2 = 0, v3 = 0;
+};
+OverlayDrag g_odrag;
+
+toml::table* FindNamed(const char* arrayKey, const std::string& name) {
+    auto* arr = g_doc[arrayKey].as_array();
+    if (!arr) return nullptr;
+    for (auto& n : *arr) {
+        if (auto* t = n.as_table(); t && GetS(*t, "name", "") == name) return t;
+    }
+    return nullptr;
+}
+
+bool EndsWith(const std::string& s, const char* suffix) {
+    size_t n = strlen(suffix);
+    return s.size() >= n && s.compare(s.size() - n, n, suffix) == 0;
+}
+
+// Writes a mirror or group output position so a w x h box lands with its top-left at (x, y).
+void PlaceOutput(toml::table& out, int x, int y, int w, int h) {
+    std::string anchor = GetS(out, "relativeTo", "centerViewport");
+    const Runtime& rt = g_rt;
+    bool screen = EndsWith(anchor, "Screen");
+    int cw = screen ? rt.screenW : rt.destW, ch = screen ? rt.screenH : rt.destH;
+    int bx = screen ? 0 : rt.destX, by = screen ? 0 : rt.destY;
+    int rx = 0, ry = 0;
+    RelativeCoordsInverse(anchor, x - bx, y - by, w, h, cw, ch, rx, ry);
+    if (GetB(out, "useRelativePosition", false)) {
+        out.insert_or_assign("relativeX", static_cast<double>(rx) / std::max(rt.screenW, 1));
+        out.insert_or_assign("relativeY", static_cast<double>(ry) / std::max(rt.screenH, 1));
+    } else {
+        out.insert_or_assign("x", static_cast<int64_t>(rx));
+        out.insert_or_assign("y", static_cast<int64_t>(ry));
+    }
+}
+
+void PlaceImageLike(toml::table& t, const char* anchorKey, const char* anchorDef, int x, int y, int w, int h) {
+    int rx = 0, ry = 0;
+    ImageCoordsInverse(GetS(t, anchorKey, anchorDef), x, y, w, h, rx, ry);
+    t.insert_or_assign("x", static_cast<int64_t>(rx));
+    t.insert_or_assign("y", static_cast<int64_t>(ry));
+}
+
+// Remembers the config values a drag changes, so each frame applies the total mouse movement to them.
+void BeginOverlayDrag(const EditRect& r, bool resize) {
+    g_odrag = OverlayDrag{};
+    g_odrag.active = true;
+    g_odrag.resize = resize;
+    g_odrag.start = r;
+    // Measured from where the button went down, not where the pointer is on the first drag frame.
+    g_odrag.mouse0 = ImGui::GetIO().MouseClickedPos[ImGuiMouseButton_Left];
+    if (r.kind == EditKind::Mirror) {
+        if (toml::table* m = FindNamed("mirror", r.name)) {
+            toml::table& out = SubTable(*m, "output", true);
+            g_odrag.v0 = GetF(out, "scale", 1);
+            g_odrag.v1 = GetF(out, "scaleX", 1);
+            g_odrag.v2 = GetF(out, "scaleY", 1);
+        }
+    } else if (r.kind == EditKind::Group) {
+        if (toml::table* g = FindNamed("mirrorGroup", r.name)) {
+            toml::table& out = SubTable(*g, "output", true);
+            g_odrag.v0 = static_cast<double>(GetI(out, "x", 0));
+            g_odrag.v1 = static_cast<double>(GetI(out, "y", 0));
+            g_odrag.v2 = GetF(out, "relativeX", 0.5);
+            g_odrag.v3 = GetF(out, "relativeY", 0.5);
+        }
+    } else if (r.kind == EditKind::Image) {
+        if (toml::table* im = FindNamed("image", r.name)) {
+            g_odrag.v0 = GetF(*im, "scale", 1);
+            g_odrag.v1 = static_cast<double>(GetI(*im, "width", 0));
+            g_odrag.v2 = static_cast<double>(GetI(*im, "height", 0));
+        }
+    } else {
+        g_odrag.v0 = GetF(SubTable(g_doc, "ninjabrainOverlay"), "overlayScale", 0.3);
+    }
+}
+
+// Scales written by drags are kept to 3 decimals so the saved config stays readable.
+double Round3(double v) { return std::round(v * 1000.0) / 1000.0; }
+
+void UpdateOverlayDrag() {
+    const OverlayDrag& d = g_odrag;
+    ImVec2 m = ImGui::GetIO().MousePos;
+    float dx = m.x - d.mouse0.x, dy = m.y - d.mouse0.y;
+    const EditRect& r = d.start;
+    int x0 = static_cast<int>(std::lround(r.x)), y0 = static_cast<int>(std::lround(r.y));
+    int w0 = static_cast<int>(std::lround(r.w)), h0 = static_cast<int>(std::lround(r.h));
+    // Resizing scales about the top-left corner: uniformly when the aspect ratio is locked (or the
+    // overlay only has one scale), otherwise each axis follows the mouse.
+    float kx = 1, ky = 1;
+    if (d.resize) {
+        kx = std::max(0.05f, (r.w + dx) / std::max(r.w, 1.0f));
+        ky = std::max(0.05f, (r.h + dy) / std::max(r.h, 1.0f));
+        if (g_aspectLock) kx = ky = std::max(kx, ky);
+    }
+    int nx = d.resize ? x0 : static_cast<int>(std::lround(r.x + dx));
+    int ny = d.resize ? y0 : static_cast<int>(std::lround(r.y + dy));
+    int nw = static_cast<int>(std::lround(w0 * kx)), nh = static_cast<int>(std::lround(h0 * ky));
+    switch (r.kind) {
+    case EditKind::Mirror: {
+        toml::table* mt = FindNamed("mirror", r.name);
+        if (!mt) return;
+        toml::table& out = SubTable(*mt, "output", true);
+        if (d.resize) {
+            bool separate = GetB(out, "separateScale", false);
+            if (!g_aspectLock && !separate) {
+                // Free resizing needs a scale per axis.
+                out.insert_or_assign("separateScale", true);
+                separate = true;
+            }
+            if (separate) {
+                double bx = GetB(out, "separateScale", false) && d.v1 > 0 ? d.v1 : d.v0;
+                double by = d.v2 > 0 ? d.v2 : d.v0;
+                out.insert_or_assign("scaleX", Round3(std::clamp(bx * kx, 0.05, 50.0)));
+                out.insert_or_assign("scaleY", Round3(std::clamp(by * ky, 0.05, 50.0)));
+            } else {
+                out.insert_or_assign("scale", Round3(std::clamp(d.v0 * kx, 0.05, 50.0)));
+            }
+        }
+        PlaceOutput(out, nx, ny, nw, nh);
+        break;
+    }
+    case EditKind::Group: {
+        // A group's anchor applies to each of its mirrors, so the group moves by offset deltas.
+        toml::table* gt = FindNamed("mirrorGroup", r.name);
+        if (!gt || d.resize) return;
+        toml::table& out = SubTable(*gt, "output", true);
+        std::string anchor = GetS(out, "relativeTo", "centerViewport");
+        int ax0, ay0, ax1, ay1;
+        RelativeCoordsInverse(anchor, 0, 0, 10, 10, 1000, 1000, ax0, ay0);
+        RelativeCoordsInverse(anchor, 1, 1, 10, 10, 1000, 1000, ax1, ay1);
+        int sx = ax1 - ax0, sy = ay1 - ay0;
+        if (GetB(out, "useRelativePosition", false)) {
+            out.insert_or_assign("relativeX", d.v2 + sx * dx / std::max(g_rt.screenW, 1));
+            out.insert_or_assign("relativeY", d.v3 + sy * dy / std::max(g_rt.screenH, 1));
+        } else {
+            out.insert_or_assign("x", static_cast<int64_t>(std::lround(d.v0 + sx * dx)));
+            out.insert_or_assign("y", static_cast<int64_t>(std::lround(d.v1 + sy * dy)));
+        }
+        break;
+    }
+    case EditKind::Image: {
+        toml::table* im = FindNamed("image", r.name);
+        if (!im) return;
+        if (d.resize) {
+            bool fixed = !GetB(*im, "relativeSizing", true) && d.v1 > 0 && d.v2 > 0;
+            if (fixed) {
+                im->insert_or_assign("width", static_cast<int64_t>(std::max<long>(1, std::lround(d.v1 * kx))));
+                im->insert_or_assign("height", static_cast<int64_t>(std::max<long>(1, std::lround(d.v2 * ky))));
+            } else {
+                im->insert_or_assign("scale", Round3(std::clamp(d.v0 * kx, 0.01, 50.0)));
+            }
+        }
+        PlaceImageLike(*im, "relativeTo", "topLeftScreen", nx, ny, nw, nh);
+        break;
+    }
+    case EditKind::Ninjabrain: {
+        toml::table& nb = SubTable(g_doc, "ninjabrainOverlay");
+        if (d.resize) nb.insert_or_assign("overlayScale", Round3(std::clamp(d.v0 * kx, 0.005, 5.0)));
+        PlaceImageLike(nb, "relativeTo", "topLeftScreen", nx, ny, nw, nh);
+        break;
+    }
+    }
+    Changed();
+}
+
+const char* EditKindName(EditKind k) {
+    switch (k) {
+    case EditKind::Mirror: return "Mirror";
+    case EditKind::Group: return "Group";
+    case EditKind::Image: return "Image";
+    default: return "Panel";
+    }
+}
+
+// Adds a mirror built from a capture area and a destination drawn on screen, and shows it in the
+// current mode. The capture area is converted from screen pixels to game pixels; the output scale fits
+// the capture into the destination, centred.
+void CreateMirrorFromRects(ImVec2 s0, ImVec2 s1, ImVec2 d0, ImVec2 d1) {
+    const Runtime& rt = g_rt;
+    float sxScale = rt.gameW > 0 ? static_cast<float>(rt.destW) / rt.gameW : 1.0f;
+    float syScale = rt.gameH > 0 ? static_cast<float>(rt.destH) / rt.gameH : 1.0f;
+    int capW = std::clamp(static_cast<int>(std::lround((s1.x - s0.x) / sxScale)), 4, 2000);
+    int capH = std::clamp(static_cast<int>(std::lround((s1.y - s0.y) / syScale)), 4, 2000);
+    int inX = static_cast<int>(std::lround((s0.x - rt.destX) / sxScale));
+    int inY = static_cast<int>(std::lround((s0.y - rt.destY) / syScale));
+    float fit = std::clamp(std::min((d1.x - d0.x) / capW, (d1.y - d0.y) / capH), 0.1f, 20.0f);
+    int outW = static_cast<int>(capW * fit), outH = static_cast<int>(capH * fit);
+    int outX = static_cast<int>(d0.x + ((d1.x - d0.x) - outW) / 2), outY = static_cast<int>(d0.y + ((d1.y - d0.y) - outH) / 2);
+
+    std::string name;
+    for (int i = static_cast<int>(SubArray(g_doc, "mirror").size()) + 1;; i++) {
+        name = "Mirror " + std::to_string(i);
+        if (!FindNamed("mirror", name)) break;
+    }
+    toml::table m = NewMirror();
+    m.insert_or_assign("name", name);
+    m.insert_or_assign("captureWidth", static_cast<int64_t>(capW));
+    m.insert_or_assign("captureHeight", static_cast<int64_t>(capH));
+    m.insert_or_assign("rawOutput", true);
+    toml::array in;
+    in.push_back(InlineTable({{"relativeTo", "topLeftViewport"}, {"x", inX}, {"y", inY}}));
+    m.insert_or_assign("input", std::move(in));
+    toml::table out = InlineTable({{"relativeTo", g_createRelative ? "topLeftScreen" : "topLeftViewport"}, {"x", 0}, {"y", 0},
+                                   {"scale", Round3(fit)}, {"separateScale", false}, {"scaleX", 1.0}, {"scaleY", 1.0},
+                                   {"useRelativePosition", g_createRelative}});
+    PlaceOutput(out, outX, outY, outW, outH);
+    m.insert_or_assign("output", std::move(out));
+    m.insert_or_assign("border", toml::table{{"type", "Static"}, {"staticThickness", 0}});
+    SubArray(g_doc, "mirror").push_back(std::move(m));
+
+    // Show it in the current mode.
+    if (auto* modes = g_doc["mode"].as_array()) {
+        for (auto& n : *modes) {
+            toml::table* mt = n.as_table();
+            if (!mt || GetS(*mt, "id", "") != rt.currentMode) continue;
+            if (mt->contains("sources") || !mt->contains("mirrorIds")) {
+                SubArray(*mt, "sources").push_back(InlineTable({{"id", name}, {"type", "Mirror"}}));
+            } else {
+                SubArray(*mt, "mirrorIds").push_back(name);
+            }
+        }
+    }
+    Changed();
+    Status("Added " + name + " to mode " + rt.currentMode + " (Save to keep it)", 6);
+}
+
+void DrawOverlayEditor() {
+    if (!g_editOverlays && g_createStage == 0) return;
+    ImGuiIO& io = ImGui::GetIO();
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(io.DisplaySize);
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoSavedSettings |
+                             ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoFocusOnAppearing |
+                             ImGuiWindowFlags_NoNav;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    ImGui::Begin("##overlay-editor", nullptr, flags);
+    ImGui::PopStyleVar(2);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const float hs = 14 * g_uiScale;  // resize handle size (inside the box corner, so it stays on screen)
+
+    if (g_createStage != 0) {
+        // Drawing a rectangle anywhere on screen.
+        ImGui::SetCursorScreenPos(ImVec2(0, 0));
+        ImGui::InvisibleButton("##create", io.DisplaySize);
+        if (ImGui::IsItemActivated()) {
+            g_dragFrom = io.MouseClickedPos[ImGuiMouseButton_Left];
+            g_createDragging = true;
+        }
+        ImVec2 a = g_dragFrom, b = io.MousePos;
+        ImVec2 r0(std::min(a.x, b.x), std::min(a.y, b.y)), r1(std::max(a.x, b.x), std::max(a.y, b.y));
+        if (g_createStage == 2) {
+            dl->AddRectFilled(g_createSrc0, g_createSrc1, IM_COL32(230, 40, 40, 30));
+            dl->AddRect(g_createSrc0, g_createSrc1, IM_COL32(230, 40, 40, 255), 0, 0, 2);
+        }
+        ImU32 col = g_createStage == 1 ? IM_COL32(230, 40, 40, 255) : IM_COL32(255, 140, 0, 255);
+        if (g_createDragging && ImGui::IsItemActive()) {
+            dl->AddRectFilled(r0, r1, (col & 0x00FFFFFF) | 0x1E000000);
+            dl->AddRect(r0, r1, col, 0, 0, 2);
+        }
+        if (g_createDragging && ImGui::IsItemDeactivated()) {
+            g_createDragging = false;
+            if (r1.x - r0.x >= 8 && r1.y - r0.y >= 8) {
+                if (g_createStage == 1) {
+                    g_createSrc0 = r0;
+                    g_createSrc1 = r1;
+                    g_createStage = 2;
+                } else {
+                    CreateMirrorFromRects(g_createSrc0, g_createSrc1, r0, r1);
+                    g_createStage = 0;
+                }
+            }
+        }
+        const char* msg = g_createStage == 1 ? "Draw the area to capture (source). Click and drag; Esc cancels."
+                                             : "Now draw where to display it (destination). Esc cancels.";
+        ImVec2 ts = ImGui::CalcTextSize(msg);
+        ImVec2 p((io.DisplaySize.x - ts.x) / 2, 40 * g_uiScale);
+        dl->AddRectFilled(ImVec2(p.x - 12, p.y - 8), ImVec2(p.x + ts.x + 12, p.y + ts.y + 8), IM_COL32(20, 20, 30, 230), 6);
+        dl->AddText(p, IM_COL32(255, 255, 255, 255), msg);
+        ImGui::End();
+        return;
+    }
+
+    const std::vector<EditRect>& rects = RenderEditRects();
+    if (g_odrag.active) {
+        if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+            UpdateOverlayDrag();
+        } else {
+            g_odrag.active = false;
+        }
+    }
+    // Overlays drawn later sit on top, so they are offered the mouse first (the first item submitted wins).
+    for (size_t i = rects.size(); i-- > 0;) {
+        const EditRect& r = rects[i];
+        ImVec2 p0(r.x, r.y), p1(r.x + r.w, r.y + r.h);
+        bool dragging = g_odrag.active && g_odrag.start.kind == r.kind && g_odrag.start.name == r.name;
+        ImGui::PushID(static_cast<int>(i));
+        // Resize: the bottom-right handle, submitted first so it wins over the move area it sits in (groups
+        // move only). Move: the whole box.
+        bool canResize = r.kind != EditKind::Group;
+        float h = std::min(hs, std::max(4.0f, std::min(r.w, r.h) / 2));
+        ImVec2 h0(p1.x - h, p1.y - h);
+        bool handleHovered = false;
+        if (canResize) {
+            ImGui::SetCursorScreenPos(h0);
+            ImGui::InvisibleButton("##resize", ImVec2(h, h));
+            handleHovered = ImGui::IsItemHovered();
+            if (ImGui::IsItemActivated()) BeginOverlayDrag(r, true);
+            if (handleHovered || (dragging && g_odrag.resize)) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNWSE);
+        }
+        ImGui::SetCursorScreenPos(p0);
+        ImGui::InvisibleButton("##move", ImVec2(std::max(r.w, 4.0f), std::max(r.h, 4.0f)));
+        bool hovered = ImGui::IsItemHovered() || handleHovered;
+        if (ImGui::IsItemActivated()) BeginOverlayDrag(r, false);
+        if ((hovered && !handleHovered) || (dragging && !g_odrag.resize)) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+        ImU32 col = dragging ? IM_COL32(255, 200, 0, 255) : hovered ? IM_COL32(120, 220, 255, 255) : IM_COL32(120, 220, 255, 150);
+        dl->AddRect(p0, p1, col, 0, 0, dragging || hovered ? 2.0f : 1.0f);
+        if (canResize) dl->AddRectFilled(h0, p1, col);
+        std::string label = std::string(EditKindName(r.kind)) + ": " + r.name;
+        ImVec2 ts = ImGui::CalcTextSize(label.c_str());
+        ImVec2 lp(p0.x, p0.y - ts.y - 2 >= 0 ? p0.y - ts.y - 2 : p1.y + 2);
+        dl->AddRectFilled(lp, ImVec2(lp.x + ts.x + 6, lp.y + ts.y), IM_COL32(0, 0, 0, 170));
+        dl->AddText(ImVec2(lp.x + 3, lp.y), col, label.c_str());
+        ImGui::PopID();
+    }
+    ImGui::End();
+}
+
+// Esc first cancels an on-screen drawing step; returns true when it did.
+bool CancelOnScreenAction() {
+    if (g_createStage != 0) {
+        g_createStage = 0;
+        g_createDragging = false;
+        return true;
+    }
+    return false;
+}
+
 void DrawEditor() {
     ImGuiIO& io = ImGui::GetIO();
     ImVec2 size(std::min(io.DisplaySize.x * 0.9f, 980 * g_uiScale), std::min(io.DisplaySize.y * 0.88f, 760 * g_uiScale));
@@ -1063,7 +1501,7 @@ void DrawEditor() {
         std::string err;
         if (WriteConfigToml(g_doc, err)) {
             g_dirty = false;
-            Status("Saved to " + ConfigPath());
+            Status("Saved to " + DisplayPath(ConfigPath()));
         } else {
             Status("Save failed: " + err, 8);
         }
@@ -1083,6 +1521,11 @@ void DrawEditor() {
     ImGui::SameLine();
     if (NowSeconds() < g_statusUntil) ImGui::TextUnformatted(g_status.c_str());
     else ImGui::TextDisabled("Changes apply immediately; Save writes them to config.toml.");
+    ImGui::Checkbox("Edit overlays on screen (drag to move, corner to resize)", &g_editOverlays);
+    if (g_editOverlays) {
+        ImGui::SameLine();
+        ImGui::Checkbox("Lock aspect ratio", &g_aspectLock);
+    }
     ImGui::Separator();
 
     if (ImGui::BeginTabBar("tabs")) {
@@ -1212,6 +1655,7 @@ void TsImGuiAssert(const char* expr, const char* file, int line) {
 bool GuiCapturingKeys() { return g_capTable != nullptr; }
 
 bool GuiWantsTextInput() { return g_imguiReady && ImGui::GetIO().WantTextInput; }
+bool GuiCancelOnScreenAction() { return CancelOnScreenAction(); }
 
 void GuiCaptureKey(int vk, bool pressed) {
     if (!g_capTable) return;
@@ -1280,6 +1724,7 @@ void GuiRender() {
     g_lastFrame = now;
     ImGui_ImplOpenGL3_NewFrame();
     ImGui::NewFrame();
+    DrawOverlayEditor();
     DrawEditor();
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());

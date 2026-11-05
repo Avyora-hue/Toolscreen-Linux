@@ -7,6 +7,7 @@ void GuiRender();      // draws the editor; called from RenderFrame while it is 
 void GuiOnOpened();    // reloads the document from config.toml
 bool GuiCapturingKeys();
 bool GuiWantsTextInput();
+bool GuiCancelOnScreenAction();  // Esc: cancels an on-screen drawing step, true if it did
 void GuiCaptureKey(int vk, bool pressed);
 void GuiOnKey(int glfwKey, int action);
 void GuiOnChar(unsigned int c);

@@ -28,6 +28,8 @@ std::vector<double> g_sensLastFire;
 std::vector<bool> g_sensToggled;
 size_t g_cfgGeneration = 0;
 bool g_rebindsActive = true;
+// GLFW key each rebound key's press was delivered as (0 = not rebound), indexed by virtual key.
+int g_pressedOutput[512] = {};
 std::string g_lastGameState;
 
 const std::map<int, int>& GlfwToVkMap() {
@@ -174,7 +176,7 @@ void FireToggle(size_t i) {
 // hotkey closes it, except while typing in a text field.
 bool HandleEditorKey(int vk) {
     if (GuiWantsTextInput()) return true;
-    if (vk == 0x1B) g_rt.guiOpen = false;
+    if (vk == 0x1B && !GuiCancelOnScreenAction()) g_rt.guiOpen = false;
     return true;
 }
 
@@ -296,8 +298,13 @@ bool ProcessRelease(int vk) {
         }
         if (hr.releaseArmed) {
             hr.releaseArmed = false;
-            hr.lastFire = now;
-            FireToggle(i);
+            // Exclusion keys are checked again at release: one pressed while the trigger was held cancels it.
+            bool excluded = false;
+            for (int ex : h.conditions.exclusions) excluded = excluded || IsVkHeld(ex);
+            if (!excluded) {
+                hr.lastFire = now;
+                FireToggle(i);
+            }
             if (h.blockKeyFromGame) swallow = true;
         }
         if (h.blockKeyFromGame && ComboUsesKey(h.keys, vk) && !h.triggerOnHold && !h.triggerOnRelease) swallow = true;
@@ -366,9 +373,22 @@ bool InputOnKey(int glfwKey, int scancode, int action, int mods, int& outKey) {
     }
 
     if (action == GLFW_PRESS && vk && ProcessPress(vk)) return false;
-    if (action == GLFW_RELEASE && vk && ProcessRelease(vk)) return false;
+    if (action == GLFW_RELEASE && vk && ProcessRelease(vk)) {
+        // A release a hotkey swallows still reaches the game when the press already did as a rebound key.
+        if (vk >= 512 || g_pressedOutput[vk] == 0) return false;
+        outKey = g_pressedOutput[vk];
+        g_pressedOutput[vk] = 0;
+        return true;
+    }
     if (g_rt.guiOpen && action != GLFW_RELEASE) return false;
 
+    // Repeats and the release go to the key the press went to, so a rebind toggled, edited or switched by
+    // cursor state while the key is held cannot leave the rebound key stuck down in the game.
+    if (vk > 0 && vk < 512 && action != GLFW_PRESS && g_pressedOutput[vk] != 0) {
+        outKey = g_pressedOutput[vk];
+        if (action == GLFW_RELEASE) g_pressedOutput[vk] = 0;
+        return true;
+    }
     const Config& cfg = g_rt.cfg;
     if (cfg.keyRebindsEnabled && g_rebindsActive && vk) {
         for (auto& r : cfg.rebinds) {
@@ -380,6 +400,7 @@ bool InputOnKey(int glfwKey, int scancode, int action, int mods, int& outKey) {
             break;
         }
     }
+    if (vk > 0 && vk < 512 && action == GLFW_PRESS) g_pressedOutput[vk] = outKey != glfwKey ? outKey : 0;
     return true;
 }
 

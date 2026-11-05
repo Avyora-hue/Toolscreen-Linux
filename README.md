@@ -28,6 +28,8 @@ library into the game when it starts (through `LD_PRELOAD`). A one-click install
 | Image overlays | ✅ |
 | Live Ninjabrain Bot panel (via Ninjabrain Bot's API) | ✅ |
 | In-game settings editor (Ctrl+I) | ✅ |
+| Edit overlays on screen: drag to move, corner to resize; draw new mirrors | ✅ |
+| Game state from the state-output or Hermes mod | ✅ |
 | Recommended settings built for your computer (Defaults tab) | ✅ Linux-port addition |
 | Low-sensitivity hotkey for measuring (boat-eye safe) | ✅ |
 | OneShot mode for the bow one-shot on the Ender Dragon | ✅ Linux-port addition |
@@ -50,7 +52,7 @@ on KDE Plasma (X11) with an NVIDIA GPU.
 
 ## Installing
 
-1. **Download** `Toolscreen-1.3.6-linux-double-click-me.jar` from the [Releases](../../releases) page.
+1. **Download** `Toolscreen-1.4.4-linux-double-click-me.jar` from the [Releases](../../releases) page.
 2. **Open your instance folder.** In Prism Launcher: right-click the instance → **Folder**.
    In MultiMC: right-click → **Instance Folder**.
 3. **Copy the jar into that folder.**
@@ -59,7 +61,7 @@ on KDE Plasma (X11) with an NVIDIA GPU.
 5. **Double-click the jar.** If your file manager opens it as an archive instead, right-click → *Open with* →
    *Java*, or run this in a terminal from that folder:
    ```sh
-   java -jar Toolscreen-1.3.6-linux-double-click-me.jar
+   java -jar Toolscreen-1.4.4-linux-double-click-me.jar
    ```
 6. Click **Install**, then reopen your launcher and start the instance as usual.
 
@@ -69,10 +71,10 @@ You can also run the jar from anywhere: it then lists every MultiMC / Prism inst
 From a terminal or script:
 
 ```sh
-java -jar Toolscreen-1.3.6-linux-double-click-me.jar --list
-java -jar Toolscreen-1.3.6-linux-double-click-me.jar --install   "/path/to/instance"
-java -jar Toolscreen-1.3.6-linux-double-click-me.jar --uninstall "/path/to/instance"
-java -jar Toolscreen-1.3.6-linux-double-click-me.jar --build-recommended "/path/to/instance"   # only rebuild the recommended settings
+java -jar Toolscreen-1.4.4-linux-double-click-me.jar --list
+java -jar Toolscreen-1.4.4-linux-double-click-me.jar --install   "/path/to/instance"
+java -jar Toolscreen-1.4.4-linux-double-click-me.jar --uninstall "/path/to/instance"
+java -jar Toolscreen-1.4.4-linux-double-click-me.jar --build-recommended "/path/to/instance"   # only rebuild the recommended settings
 ```
 
 ### What the installer does
@@ -114,7 +116,8 @@ Nothing is sent anywhere, and nothing outside the instance folder and `~/.config
 
 Mode hotkeys don't fire while F3 is held, so F3 shortcuts (like F3+B) keep working. When you leave a world (title
 screen, wall), Toolscreen goes back to Fullscreen and turns the low sensitivity off by itself. That needs the
-[state-output](https://github.com/tildejustin/state-output) mod, which MCSR Ranked and most speedrun packs include.
+[state-output](https://github.com/tildejustin/state-output) mod, which MCSR Ranked and most speedrun packs include, or
+the Hermes mod (used instead whenever it is running).
 
 O, B and P come with the recommended settings; with Toolscreen's plain defaults only Z, J, Left Alt and Ctrl+I exist.
 
@@ -129,6 +132,11 @@ While it is open, the game doesn't receive your keys or mouse.
 - To change a hotkey, click its key button and **press the keys**. Esc cancels.
 - Tabs: **Status**, **Defaults**, General, Modes, Hotkeys, Mirrors, Mirror groups, Images, EyeZoom, Ninjabrain Bot,
   Mouse & keys.
+- **Edit overlays on screen** (checkbox at the top): every mirror, mirror group, image and the Ninjabrain Bot panel
+  gets a labelled box. Drag a box to move it, drag its corner square to resize it (groups move only). "Lock aspect
+  ratio" keeps the shape while resizing. Move the editor window aside by its title bar to reach overlays behind it.
+- **Mirrors → Create interactively:** draw the area to capture, then where to show it; the new mirror is added to the
+  current mode. Esc cancels.
 
 ### The config file
 
@@ -246,6 +254,25 @@ instance; it then logs its CPU/GPU time every 5 seconds.
 
 ## Changes
 
+### 1.4.4-linux.1
+
+Brings in the useful changes of Toolscreen 1.4.4 (the build inside the 1.4.7 download; 1.4.5 to 1.4.7 changed only
+the Windows installer):
+
+- **Edit overlays on screen** in the Ctrl+I editor: drag to move, corner to resize, aspect-ratio lock; works for
+  mirrors, mirror groups, images and the Ninjabrain Bot panel, with every anchor.
+- **Create mirrors interactively** by drawing the capture area and the destination on screen.
+- **Hermes game-state support** next to state-output (Hermes is used while its heartbeat is live).
+- **Opacity for each Ninjabrain Bot panel colour** (stored as a 4th colour value, as in Toolscreen 1.4).
+- **Rebound keys can no longer get stuck:** a key's release now always goes to the key its press went to, even if
+  rebinds were toggled or the cursor state changed while it was held.
+- Exclusion keys are checked again when a trigger-on-release hotkey fires; your home folder shows as `~` in the editor.
+- **EyeZoom numbers are sharp at small sizes:** small text is drawn from glyphs made at its own size instead of a
+  shrunk 64 px font.
+
+Windows-only fixes from 1.4 (cursor and alt-tab handling, low-level keyboard hooks, OBS capture) don't apply here.
+Toolscreen's CPU time per frame is unchanged.
+
 ### 1.3.6-linux.2
 
 - **Settings editor (Ctrl+I)** with tabs for everything in the config, live preview, Save / Revert, and hotkey
@@ -294,7 +321,7 @@ You need `g++`, `python3` and Java. A JDK is optional: without `javac`, the buil
 ```sh
 ./build.sh
 # → native/build/libtoolscreen.so
-# → dist/Toolscreen-1.3.6-linux-double-click-me.jar
+# → dist/Toolscreen-1.4.4-linux-double-click-me.jar
 ```
 
 Project layout:

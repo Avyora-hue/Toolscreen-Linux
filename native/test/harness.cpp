@@ -60,6 +60,8 @@ G(void, glBindVertexArray, GLuint)
 G(void, glGenBuffers, GLsizei, GLuint*)
 G(void, glBindBuffer, GLenum, GLuint)
 G(void, glBufferData, GLenum, GLsizeiptr, const void*, GLenum)
+G(GLint, glGetUniformLocation, GLuint, const char*)
+G(void, glUniform2i, GLint, GLint, GLint)
 #undef G
 }  // namespace P
 
@@ -115,7 +117,7 @@ int main() {
     L(glGenTextures); L(glBindTexture); L(glTexImage2D); L(glTexParameteri); L(glEnable); L(glDisable); L(glScissor);
     L(glDrawArrays); L(glCreateShader); L(glShaderSource); L(glCompileShader); L(glCreateProgram); L(glAttachShader);
     L(glLinkProgram); L(glUseProgram); L(glGenVertexArrays); L(glBindVertexArray); L(glGenBuffers); L(glBindBuffer);
-    L(glBufferData);
+    L(glBufferData); L(glGetUniformLocation); L(glUniform2i);
 #undef L
     glfwGetFramebufferSize(win, &g_w, &g_h);
     printf("harness: initial framebuffer %dx%d\n", g_w, g_h);
@@ -133,6 +135,19 @@ int main() {
     P::glLinkProgram(prog);
     GLuint vao;
     P::glGenVertexArrays(1, &vao);
+    // HARNESS_EYETEST: every pixel within 64 columns of the centre encodes its own game position
+    // (R = x - w/2 + 128, G = y low byte, B = y high byte, top-left origin) so a screenshot of a zoom
+    // can be decoded back to the exact game pixel each screen pixel shows.
+    const bool eyeTest = getenv("HARNESS_EYETEST") != nullptr;
+    const char* efs = "#version 330 core\nout vec4 c;uniform ivec2 s;void main(){int x=int(gl_FragCoord.x);int y=s.y-1-int(gl_FragCoord.y);"
+                      "c=vec4(float(x-s.x/2+128)/255.0,float(y&255)/255.0,float((y>>8)&255)/255.0,1);}";
+    GLuint ef = P::glCreateShader(GL_FRAGMENT_SHADER);
+    P::glShaderSource(ef, 1, &efs, nullptr);
+    P::glCompileShader(ef);
+    GLuint eprog = P::glCreateProgram();
+    P::glAttachShader(eprog, v);
+    P::glAttachShader(eprog, ef);
+    P::glLinkProgram(eprog);
 
     int frames = 0;
     const char* maxFramesEnv = getenv("HARNESS_FRAMES");
@@ -170,6 +185,13 @@ int main() {
         Rect(14, 38, 12, 7, 221 / 255.f, 221 / 255.f, 221 / 255.f);
         // Pie chart "blockentities" colour 233,109,77 near pieRight.
         Rect(g_w - 36, g_h - 220, 19, 4, 233 / 255.f, 109 / 255.f, 77 / 255.f);
+        if (eyeTest) {
+            P::glScissor(g_w / 2 - 64, 0, 128, g_h);
+            P::glUseProgram(eprog);
+            P::glUniform2i(P::glGetUniformLocation(eprog, "s"), g_w, g_h);
+            P::glBindVertexArray(vao);
+            P::glDrawArrays(GL_TRIANGLES, 0, 3);
+        }
         P::glDisable(GL_SCISSOR_TEST);
         // Present like Minecraft's Framebuffer.draw.
         P::glBindFramebuffer(GL_FRAMEBUFFER, 0);

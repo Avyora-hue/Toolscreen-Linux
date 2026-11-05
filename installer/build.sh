@@ -5,7 +5,7 @@
 set -e
 cd "$(dirname "$0")"
 ROOT=$(cd .. && pwd)
-VERSION=1.3.6
+VERSION=1.4.4
 OUT="$ROOT/dist/Toolscreen-$VERSION-linux-double-click-me.jar"
 rm -rf build && mkdir -p build/classes/native build/classes/META-INF build/classes/defaults
 if command -v javac >/dev/null 2>&1; then
@@ -27,7 +27,7 @@ cp "$ROOT/native/build/libtoolscreen.so" resources/toolscreen-wrapper.sh resourc
 cp "$ROOT/LICENSE" build/classes/META-INF/LICENSE
 cp "$ROOT/native/assets/default.toml" build/classes/defaults/default.toml
 cp "$ROOT/practice/oneshot-toolscreen.toml" build/classes/defaults/oneshot.toml
-printf 'Manifest-Version: 1.0\nMain-Class: com.toolscreen.linux.Installer\nImplementation-Title: Toolscreen for Linux\nImplementation-Version: %s-linux.2\n' "$VERSION" > build/MANIFEST.MF
+printf 'Manifest-Version: 1.0\nMain-Class: com.toolscreen.linux.Installer\nImplementation-Title: Toolscreen for Linux\nImplementation-Version: %s-linux.1\n' "$VERSION" > build/MANIFEST.MF
 mkdir -p "$ROOT/dist"
 python3 -I - "$OUT" build/MANIFEST.MF build/classes <<'PY'
 import os, sys, zipfile, stat

@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#define TS_VERSION "1.3.6-linux.2"
+#define TS_VERSION "1.4.4-linux.1"
 
 // ---------------------------------------------------------------------------
 // Logging (stderr, which MultiMC/Prism show in the instance log, plus a file)
@@ -401,6 +401,21 @@ void RenderNoteGameTextureAttach(unsigned int tex);
 void RenderNoteTextureImage(unsigned int tex, int w, int h);
 void RenderNoteTextureDeleted(unsigned int tex);
 void RenderShowToast(const std::string& text, double seconds);
+
+// Screen rectangle of an overlay drawn this frame, recorded while the editor is open so the on-screen
+// overlay editor can move and resize it. Groups record their own box (union of their mirrors).
+enum class EditKind { Mirror, Group, Image, Ninjabrain };
+struct EditRect {
+    EditKind kind;
+    std::string name;
+    float x, y, w, h;
+};
+const std::vector<EditRect>& RenderEditRects();
+// Anchor maths of the overlays, and their inverses (screen position -> config offset).
+void RelativeCoords(const std::string& type, int relX, int relY, int w, int h, int cw, int ch, int& outX, int& outY);
+void RelativeCoordsInverse(const std::string& type, int x, int y, int w, int h, int cw, int ch, int& relX, int& relY);
+void ImageCoords(const std::string& type, int relX, int relY, int w, int h, int& outX, int& outY);
+void ImageCoordsInverse(const std::string& type, int x, int y, int w, int h, int& relX, int& relY);
 
 // Mode switching
 void RequestModeSwitch(const std::string& mode);
